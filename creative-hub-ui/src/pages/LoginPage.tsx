@@ -59,7 +59,7 @@ const LoginPage = () => {
   const handleGoogleLogin = () => {
     // This should hit your API gateway route that starts the OIDC flow
     // e.g. GET /auth/oauth/google -> redirects to Keycloak / Google
-    const redirectUrl = `${API_BASE_URL}/auth/oauth/google`;
+    const redirectUrl = `${API_BASE_URL}/auth/login/google`;
     window.location.href = redirectUrl;
   };
 
