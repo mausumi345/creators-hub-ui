@@ -1,86 +1,66 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiClient } from "../lib/apiClient"; // make sure this exists
+import { apiClient } from "../lib/apiClient";
 
 const AuthCallbackPage = () => {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<"loading" | "error">("loading");
-  const [message, setMessage] = useState<string>("Finishing login...");
+  const [message, setMessage] = useState("Finalizing your login...");
 
   useEffect(() => {
-    const run = async () => {
+    (async () => {
       try {
-        // Example fragment:
-        // #access_token=xxx&refresh_token=yyy&expires_in=300
-        const hash = window.location.hash || "";
-        const params = new URLSearchParams(hash.replace(/^#/, ""));
+        const url = new URL(window.location.href);
 
-        const accessToken = params.get("access_token");
-        const refreshToken = params.get("refresh_token") || undefined;
-        const expiresIn = params.get("expires_in") || undefined;
+        // 1. Read tokens from query params
+        const accessToken = url.searchParams.get("access_token");
+        const refreshToken = url.searchParams.get("refresh_token");
+        
 
         if (!accessToken) {
-          setStatus("error");
-          setMessage("Missing access token in callback URL.");
+          console.error("No access_token in callback URL");
+          setMessage("Missing login information. Please sign in again.");
+          setTimeout(() => navigate("/login", { replace: true }), 2500);
           return;
         }
 
-        // Store tokens (gateway/apiClient will use access token)
+        // 2. Store tokens like the password login flow
         localStorage.setItem("ch_access_token", accessToken);
         if (refreshToken) {
           localStorage.setItem("ch_refresh_token", refreshToken);
         }
-        if (expiresIn) {
-          localStorage.setItem("ch_expires_in", expiresIn);
+
+        // 3. Optional but recommended: create user + session in DB via /auth/me
+        try {
+          await apiClient.get("/auth/me", {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+        } catch (err) {
+          console.warn("Calling /auth/me failed, continuing anyway", err);
         }
 
-        // Now call /auth/me via API gateway to bootstrap user + session
-        setMessage("Fetching your profile...");
-        const res = await apiClient.get("/auth/me", {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
+        // 4. Show global success toast
+        localStorage.setItem("ch_login_success", "1");
+        localStorage.setItem("ch_last_login_provider", "google");
 
-        // Optionally store user + session in localStorage for later
-        localStorage.setItem("ch_me", JSON.stringify(res.data));
-
-        // Redirect to home (or later: /feed, /dashboard, etc.)
-        navigate("/", { replace: true });
-      } catch (err: any) {
-        console.error("Auth callback error:", err);
-        setStatus("error");
-        const msg =
-          err?.response?.data?.detail ||
-          err?.message ||
-          "Something went wrong while completing login.";
-        setMessage(msg);
+        // 5. Go to onboarding (same as password login)
+        navigate("/onboarding", { replace: true });
+      } catch (err) {
+        console.error("Error in auth callback:", err);
+        setMessage("Something went wrong. Please try logging in again.");
+        setTimeout(() => navigate("/login", { replace: true }), 2500);
       }
-    };
-
-    run();
+    })();
   }, [navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black text-white">
-      <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-black/60 p-6 shadow-2xl backdrop-blur-md text-center">
-        <h1 className="text-xl font-semibold mb-3">Signing you in…</h1>
-        <p className="text-sm text-white/70 mb-4">{message}</p>
-
-        {status === "loading" && (
-          <div className="mt-2 text-xs text-white/50">
-            Please wait, this may take a few seconds.
-          </div>
-        )}
-
-        {status === "error" && (
-          <button
-            onClick={() => navigate("/login")}
-            className="mt-4 rounded-full border border-white/30 px-4 py-1.5 text-xs hover:bg-white/10"
-          >
-            Back to login
-          </button>
-        )}
+      <div className="text-center space-y-2">
+        <p className="text-sm opacity-80">{message}</p>
+        <p className="text-[11px] opacity-40">
+          You can close this window if it doesn&apos;t redirect automatically.
+        </p>
       </div>
     </div>
   );

@@ -36,11 +36,13 @@ const LoginPage = () => {
       }
 
       localStorage.setItem("ch_access_token", data.access_token);
-      if (data.refresh_token) {
+        if (data.refresh_token) {
         localStorage.setItem("ch_refresh_token", data.refresh_token);
-      }
+        }
 
-      navigate("/", { replace: true });
+        // After login → go to onboarding
+        localStorage.setItem("ch_login_success", "1");
+        navigate("/onboarding", { replace: true });
     } catch (err: any) {
       console.error("Login failed", err);
       const msg =
