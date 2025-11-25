@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
 import MainLayout from "./layouts/MainLayout";
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
@@ -9,8 +10,8 @@ import TopBar from "./components/TopBar";
 
 function App() {
   return (
-    <>
-      {/* Global “logged in successfully” toast */}
+    <AuthProvider>
+      {/* Global "logged in successfully" toast */}
       <LoginSuccessBanner />
       <TopBar />
       <Routes>
@@ -27,7 +28,7 @@ function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </>
+    </AuthProvider>
   );
 }
 

@@ -1,50 +1,44 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiClient } from "../lib/apiClient";
+import { useAuth } from "../contexts/AuthContext";
 
+/**
+ * OAuth Callback Page
+ * 
+ * After Google login via Keycloak:
+ * 1. Auth-service exchanges code for tokens
+ * 2. Auth-service creates our JWT and sets HttpOnly cookie
+ * 3. Auth-service redirects here with ?success=true
+ * 4. We verify the cookie works by calling refreshUser()
+ * 5. Navigate to onboarding
+ */
 const AuthCallbackPage = () => {
   const navigate = useNavigate();
+  const { refreshUser } = useAuth();
   const [message, setMessage] = useState("Finalizing your login...");
 
   useEffect(() => {
     (async () => {
       try {
         const url = new URL(window.location.href);
+        const success = url.searchParams.get("success");
 
-        // 1. Read tokens from query params
-        const accessToken = url.searchParams.get("access_token");
-        const refreshToken = url.searchParams.get("refresh_token");
-        
-
-        if (!accessToken) {
-          console.error("No access_token in callback URL");
-          setMessage("Missing login information. Please sign in again.");
+        if (success !== "true") {
+          console.error("OAuth callback did not indicate success");
+          setMessage("Login was not successful. Please try again.");
           setTimeout(() => navigate("/login", { replace: true }), 2500);
           return;
         }
 
-        // 2. Store tokens like the password login flow
-        localStorage.setItem("ch_access_token", accessToken);
-        if (refreshToken) {
-          localStorage.setItem("ch_refresh_token", refreshToken);
-        }
+        // The HttpOnly cookie was set by auth-service during redirect
+        // Verify it works by refreshing user data
+        await refreshUser();
 
-        // 3. Optional but recommended: create user + session in DB via /auth/me
-        try {
-          await apiClient.get("/auth/me", {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          });
-        } catch (err) {
-          console.warn("Calling /auth/me failed, continuing anyway", err);
-        }
-
-        // 4. Show global success toast
+        // Show global success toast
         localStorage.setItem("ch_login_success", "1");
         localStorage.setItem("ch_last_login_provider", "google");
 
-        // 5. Go to onboarding (same as password login)
+        // Go to onboarding
         navigate("/onboarding", { replace: true });
       } catch (err) {
         console.error("Error in auth callback:", err);
@@ -52,7 +46,7 @@ const AuthCallbackPage = () => {
         setTimeout(() => navigate("/login", { replace: true }), 2500);
       }
     })();
-  }, [navigate]);
+  }, [navigate, refreshUser]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black text-white">

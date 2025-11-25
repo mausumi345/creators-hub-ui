@@ -1,14 +1,8 @@
-import { FormEvent, useState } from "react";
+import type { FormEvent } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { apiClient } from "../lib/apiClient";
+import { useAuth } from "../contexts/AuthContext";
 import { API_BASE_URL } from "../lib/config";
-
-interface LoginResponse {
-  access_token: string;
-  refresh_token?: string;
-  token_type?: string;
-  expires_in?: number;
-}
 
 const LoginPage = () => {
   const [emailOrUsername, setEmailOrUsername] = useState("");
@@ -17,6 +11,7 @@ const LoginPage = () => {
   const [error, setError] = useState<string | null>(null);
 
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -24,30 +19,20 @@ const LoginPage = () => {
     setLoading(true);
 
     try {
-      const res = await apiClient.post<LoginResponse>("/auth/login", {
-        username: emailOrUsername, // backend accepts username or email
-        password,
-      });
+      // Login sets HttpOnly cookie automatically via server response
+      await login(emailOrUsername, password);
 
-      const data = res.data;
-
-      if (!data?.access_token) {
-        throw new Error("No access token returned from server");
-      }
-
-      localStorage.setItem("ch_access_token", data.access_token);
-        if (data.refresh_token) {
-        localStorage.setItem("ch_refresh_token", data.refresh_token);
-        }
-
-        // After login → go to onboarding
-        localStorage.setItem("ch_login_success", "1");
-        navigate("/onboarding", { replace: true });
-    } catch (err: any) {
+      // Show success message
+      localStorage.setItem("ch_login_success", "1");
+      
+      // Navigate to onboarding
+      navigate("/onboarding", { replace: true });
+    } catch (err: unknown) {
       console.error("Login failed", err);
+      const axiosError = err as { response?: { data?: { detail?: string } }; message?: string };
       const msg =
-        err?.response?.data?.detail ||
-        err?.message ||
+        axiosError?.response?.data?.detail ||
+        axiosError?.message ||
         "Login failed. Please check your credentials.";
       setError(msg);
     } finally {
