@@ -7,6 +7,7 @@ export interface AuthUser {
   id: string;
   email: string | null;
   roles: string[];
+  session_id?: string;
   locale: string | null;
   currency_code: string | null;
   timezone: string | null;
@@ -18,6 +19,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  logoutAll: () => Promise<number>;
   refreshUser: () => Promise<void>;
 }
 
@@ -44,33 +46,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Login with username/password
   const login = useCallback(async (username: string, password: string) => {
-    const response = await apiClient.post<{
-      access_token: string;
-      token_type: string;
+    // New API returns just { success: true, message: "...", expires_in: ... }
+    // Cookies are set automatically by the server
+    await apiClient.post<{
+      success: boolean;
+      message: string;
       expires_in: number;
-      user: {
-        id: string;
-        email: string | null;
-        country_code: string | null;
-        locale: string | null;
-        currency_code: string | null;
-        timezone: string | null;
-      };
     }>("/auth/login", { username, password });
 
-    // The cookie is set automatically by the server response
-    // We can use the user data from the response directly
-    setUser({
-      id: response.data.user.id,
-      email: response.data.user.email,
-      roles: [], // Login response doesn't include roles, refresh to get full user
-      locale: response.data.user.locale,
-      currency_code: response.data.user.currency_code,
-      timezone: response.data.user.timezone,
-    });
-  }, []);
+    // Fetch full user data after successful login
+    await refreshUser();
+  }, [refreshUser]);
 
-  // Logout - clears the cookie
+  // Logout - clears the cookies and revokes session
   const logout = useCallback(async () => {
     try {
       await apiClient.post("/auth/logout");
@@ -78,6 +66,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.error("Logout error:", error);
     } finally {
       setUser(null);
+    }
+  }, []);
+
+  // Logout from all devices - revokes all sessions
+  const logoutAll = useCallback(async (): Promise<number> => {
+    try {
+      const response = await apiClient.post<{
+        success: boolean;
+        message: string;
+        sessions_revoked: number;
+      }>("/auth/logout-all");
+      setUser(null);
+      return response.data.sessions_revoked;
+    } catch (error) {
+      console.error("Logout all error:", error);
+      setUser(null);
+      return 0;
     }
   }, []);
 
@@ -91,7 +96,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     checkAuth();
   }, [refreshUser]);
 
-  // Listen for 401 errors from apiClient
+  // Listen for 401 errors from apiClient (after refresh attempt failed)
   useEffect(() => {
     const handleUnauthorized = () => {
       setUser(null);
@@ -108,6 +113,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     isAuthenticated: user !== null,
     login,
     logout,
+    logoutAll,
     refreshUser,
   };
 
@@ -122,4 +128,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-

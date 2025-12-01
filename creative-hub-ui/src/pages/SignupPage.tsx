@@ -3,22 +3,13 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { apiClient } from "../lib/apiClient";
 import { API_BASE_URL } from "../lib/config";
+import { useAuth } from "../contexts/AuthContext";
 import Logo from "../components/Logo";
 
 interface SignupResponse {
   success: boolean;
   message: string;
-  access_token: string;
-  token_type: string;
   expires_in: number;
-  user: {
-    id: string;
-    email: string;
-    country_code: string;
-    locale: string;
-    currency_code: string;
-    timezone: string;
-  };
 }
 
 const SignupPage = () => {
@@ -32,6 +23,7 @@ const SignupPage = () => {
   const [error, setError] = useState<string | null>(null);
 
   const navigate = useNavigate();
+  const { refreshUser } = useAuth();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -74,7 +66,10 @@ const SignupPage = () => {
         throw new Error(data?.message || "Signup failed");
       }
 
-      localStorage.setItem("ch_login_success", "1");
+      // Refresh user data to update auth context
+      await refreshUser();
+
+      // Navigate to onboarding
       navigate("/onboarding", { replace: true });
     } catch (err: unknown) {
       console.error("Signup failed", err);
