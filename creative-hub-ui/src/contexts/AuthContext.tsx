@@ -1,5 +1,6 @@
 // src/contexts/AuthContext.tsx
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import type { ReactNode } from "react";
 import { apiClient } from "../lib/apiClient";
 
 // User type from /auth/me response
@@ -7,6 +8,7 @@ export interface AuthUser {
   id: string;
   email: string | null;
   roles: string[];
+  active_role?: string | null;
   session_id?: string;
   locale: string | null;
   currency_code: string | null;
@@ -21,6 +23,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   logoutAll: () => Promise<number>;
   refreshUser: () => Promise<void>;
+  setUser: React.Dispatch<React.SetStateAction<AuthUser | null>>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,10 +39,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Fetch current user from /auth/me (validates cookie)
   const refreshUser = useCallback(async () => {
     try {
-      const response = await apiClient.get<{ user: AuthUser }>("/auth/me");
-      setUser(response.data.user);
+      const authRes = await apiClient.get<{ user: AuthUser }>("/auth/me");
+      const authUser = authRes.data.user;
+
+      // Fetch profile roles/active_role to override KC roles
+      let roles: string[] = authUser.roles ?? [];
+      let active_role: string | null | undefined = authUser.active_role;
+      try {
+        const profileRes = await apiClient.get("/profile/me");
+        roles = profileRes.data.roles ?? roles;
+        active_role = profileRes.data.active_role ?? active_role;
+      } catch (e) {
+        // ignore profile errors here
+      }
+
+      setUser({ ...authUser, roles, active_role });
     } catch (error) {
-      // 401 means not authenticated or token expired
       setUser(null);
     }
   }, []);
@@ -115,6 +130,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     logout,
     logoutAll,
     refreshUser,
+    setUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

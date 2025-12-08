@@ -22,7 +22,8 @@ const LoginPage = () => {
     try {
       await login(emailOrUsername, password);
       localStorage.setItem("ch_login_success", "1");
-      navigate("/onboarding", { replace: true });
+      // Navigate to home - OnboardingGuard will redirect if needed
+      navigate("/", { replace: true });
     } catch (err: unknown) {
       console.error("Login failed", err);
       const axiosError = err as { response?: { data?: { detail?: string } }; message?: string };

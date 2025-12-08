@@ -38,8 +38,8 @@ const AuthCallbackPage = () => {
         localStorage.setItem("ch_login_success", "1");
         localStorage.setItem("ch_last_login_provider", "google");
 
-        // Go to onboarding
-        navigate("/onboarding", { replace: true });
+        // Navigate to home - OnboardingGuard will redirect if onboarding needed
+        navigate("/", { replace: true });
       } catch (err) {
         console.error("Error in auth callback:", err);
         setMessage("Something went wrong. Please try logging in again.");

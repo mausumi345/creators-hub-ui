@@ -69,8 +69,8 @@ const SignupPage = () => {
       // Refresh user data to update auth context
       await refreshUser();
 
-      // Navigate to onboarding
-      navigate("/onboarding", { replace: true });
+      // Navigate to home - OnboardingGuard will redirect to onboarding
+      navigate("/", { replace: true });
     } catch (err: unknown) {
       console.error("Signup failed", err);
       const axiosError = err as { response?: { data?: { detail?: string } }; message?: string };

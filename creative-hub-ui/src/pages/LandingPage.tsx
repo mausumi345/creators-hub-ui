@@ -1,7 +1,30 @@
-import { Link } from "react-router-dom";
+import { useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import Logo from "../components/Logo";
 
 const LandingPage = () => {
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate("/feed", { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
+  if (isAuthenticated) {
+    // Avoid flashing the landing page while redirecting to feed
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-black via-slate-950 to-slate-900 text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="h-8 w-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-white/60 text-sm">Loading your feed...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-slate-950 to-slate-900">
       {/* Hero Section */}
@@ -24,20 +47,37 @@ const LandingPage = () => {
             From concept sketches to finished products — collaborate and create together.
           </p>
 
-          <div className="flex flex-wrap items-center gap-4 pt-2">
-            <Link
-              to="/signup"
-              className="rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-3 text-sm font-semibold shadow-lg shadow-violet-500/30 hover:shadow-violet-500/50 transition-all hover:scale-105"
-            >
-              Get Started Free
-            </Link>
-            <Link
-              to="/login"
-              className="rounded-2xl border border-white/20 px-6 py-3 text-sm font-medium hover:bg-white/5 transition-all"
-            >
-              Sign In
-            </Link>
-          </div>
+          {!isAuthenticated ? (
+            <div className="flex flex-wrap items-center gap-4 pt-2">
+              <Link
+                to="/signup"
+                className="rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-3 text-sm font-semibold shadow-lg shadow-violet-500/30 hover:shadow-violet-500/50 transition-all hover:scale-105"
+              >
+                Get Started Free
+              </Link>
+              <Link
+                to="/login"
+                className="rounded-2xl border border-white/20 px-6 py-3 text-sm font-medium hover:bg-white/5 transition-all"
+              >
+                Sign In
+              </Link>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-4 pt-2">
+              <Link
+                to="/onboarding/profile"
+                className="rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-3 text-sm font-semibold shadow-lg shadow-violet-500/30 hover:shadow-violet-500/50 transition-all hover:scale-105"
+              >
+                Continue
+              </Link>
+              <Link
+                to="/onboarding/roles"
+                className="rounded-2xl border border-white/20 px-6 py-3 text-sm font-medium hover:bg-white/5 transition-all"
+              >
+                Manage roles
+              </Link>
+            </div>
+          )}
 
           <p className="text-xs text-white/40 pt-2">
             Free to start • No credit card required

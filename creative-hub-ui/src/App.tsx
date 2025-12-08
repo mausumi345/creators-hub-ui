@@ -6,31 +6,44 @@ import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import AuthCallbackPage from "./pages/AuthCallbackPage";
-import OnboardingPage from "./pages/OnboardingPage";
+import RolesOnboardingPage from "./pages/onboarding/RolesOnboardingPage";
+import RoleSelectionPage from "./pages/onboarding/RoleSelectionPage";
+import ProfileOnboardingPage from "./pages/onboarding/ProfileOnboardingPage";
 import LoginSuccessBanner from "./pages/LoginSuccessBanner";
 import TopBar from "./components/TopBar";
+import OnboardingGuard from "./components/OnboardingGuard";
+import FeedPage from "./pages/FeedPage";
 
 function App() {
   return (
     <AuthProvider>
       {/* Global "logged in successfully" toast */}
       <LoginSuccessBanner />
-      <TopBar />
-      <Routes>
-        {/* Routes using main layout */}
-        <Route element={<MainLayout />}>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignupPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/onboarding" element={<OnboardingPage />} />
-        </Route>
+      <OnboardingGuard>
+        <TopBar />
+        <Routes>
+          {/* Onboarding routes - no MainLayout, full screen */}
+          <Route path="/onboarding/roles" element={<RolesOnboardingPage />} />
+          <Route path="/onboarding/role" element={<RoleSelectionPage />} />
+          <Route path="/onboarding/profile" element={<ProfileOnboardingPage />} />
 
-        {/* Auth callback can be outside the layout if you want a blank page */}
-        <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          {/* Routes using main layout */}
+          <Route element={<MainLayout />}>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/feed" element={<FeedPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignupPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            {/* Legacy onboarding redirect */}
+            <Route path="/onboarding" element={<Navigate to="/onboarding/roles" replace />} />
+          </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Auth callback can be outside the layout if you want a blank page */}
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </OnboardingGuard>
     </AuthProvider>
   );
 }
