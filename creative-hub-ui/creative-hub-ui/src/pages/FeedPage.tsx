@@ -20,12 +20,18 @@ type Post = {
   media_url?: string | null;
   likes_count?: number;
   liked_by_me?: boolean;
+  tags?: TagOut[];
 };
 
 type LikeInfo = {
   user_id: string;
   user_name?: string | null;
   created_at: string;
+};
+
+type TagOut = {
+  name: string;
+  slug: string;
 };
 
 const FeedPage = () => {
@@ -282,8 +288,11 @@ const FeedPage = () => {
                   {post.tags && post.tags.length > 0 && (
                     <div className="flex flex-wrap gap-2 text-xs text-white/70">
                       {post.tags.map((t) => (
-                        <span key={t} className="px-2 py-1 rounded-full bg-white/10 border border-white/10">
-                          #{t}
+                        <span
+                          key={t.slug}
+                          className="px-2 py-1 rounded-full border border-violet-500/50 bg-violet-600/20 text-violet-100 hover:border-violet-300 hover:bg-violet-500/25 transition-colors"
+                        >
+                          #{t.name || t.slug}
                         </span>
                       ))}
                     </div>
