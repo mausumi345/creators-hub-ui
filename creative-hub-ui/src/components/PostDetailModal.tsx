@@ -1,20 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { apiClient } from "../lib/apiClient";
 import { useAuth } from "../contexts/AuthContext";
-
-type Comment = {
-  id: string;
-  text: string;
-  user_id: string;
-  created_at?: string;
-  replies?: Comment[];
-  is_deleted?: boolean;
-};
-
-type CommentListResponse = {
-  comments: Comment[];
-  total: number;
-};
+import { usePostComments } from "../hooks/usePostComments";
+import type { Comment } from "../hooks/usePostComments";
 
 interface PostDetailModalProps {
   postId: string | null;
@@ -23,28 +11,8 @@ interface PostDetailModalProps {
 
 const PostDetailModal = ({ postId, onClose }: PostDetailModalProps) => {
   const { user } = useAuth();
-  const [comments, setComments] = useState<Comment[]>([]);
+  const { comments, loading, error, refetch } = usePostComments(postId, { enabled: !!postId });
   const [commentText, setCommentText] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadComments = async () => {
-    if (!postId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await apiClient.get<CommentListResponse>(`/content/posts/${postId}/comments`);
-      setComments(res.data?.comments || []);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to load comments");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadComments();
-  }, [postId]);
 
   const submitComment = async () => {
     if (!postId || !commentText.trim()) return;
@@ -54,17 +22,23 @@ const PostDetailModal = ({ postId, onClose }: PostDetailModalProps) => {
         user_id: user?.id,
       });
       setCommentText("");
-      await loadComments();
+      await refetch();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to comment");
+      // leave error handling simple here
     }
+  };
+
+  const displayUser = (uid?: string, name?: string | null) => {
+    if (user?.id && uid && uid === user.id) return "You";
+    if (name) return name;
+    return "User";
   };
 
   const renderComments = (items: Comment[], depth = 0) => {
     return items.map((c) => (
       <div key={c.id} className="border border-white/10 rounded-xl p-3 bg-white/[0.04]" style={{ marginLeft: depth ? 16 : 0 }}>
         <div className="text-xs text-white/50 flex items-center justify-between">
-          <span>User: {c.user_id}</span>
+          <span>{displayUser(c.user_id, c.author_name)}</span>
           <span>{c.created_at ? new Date(c.created_at).toLocaleString() : ""}</span>
         </div>
         <p className="text-sm text-white mt-1">{c.is_deleted ? "(deleted)" : c.text}</p>

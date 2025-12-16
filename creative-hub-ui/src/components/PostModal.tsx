@@ -60,6 +60,7 @@ const PostModal = ({ isOpen, onClose, onCreated }: PostModalProps) => {
         visibility,
         created_as_role: user?.active_role || user?.roles?.[0] || "CREATOR",
         owner_id: user?.id,
+        author_name: user?.email || user?.id,
         tags: tags
           .split(",")
           .map((t) => t.trim())
