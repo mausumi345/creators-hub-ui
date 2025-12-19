@@ -13,6 +13,8 @@ import LoginSuccessBanner from "./pages/LoginSuccessBanner";
 import TopBar from "./components/TopBar";
 import OnboardingGuard from "./components/OnboardingGuard";
 import FeedPage from "./pages/FeedPage";
+import CollaborationPage from "./pages/CollaborationPage";
+import ChatPage from "./pages/ChatPage";
 
 function App() {
   return (
@@ -31,6 +33,8 @@ function App() {
           <Route element={<MainLayout />}>
             <Route path="/" element={<LandingPage />} />
             <Route path="/feed" element={<FeedPage />} />
+            <Route path="/collaboration" element={<CollaborationPage />} />
+            <Route path="/chat/:threadId" element={<ChatPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
