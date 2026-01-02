@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { apiClient } from "../lib/apiClient";
+import { useAuth } from "../contexts/AuthContext";
 
 type Role = "designer" | "maker" | "tailor" | "customer";
 type CollabMode = "tailor" | "project";
 type FulfillmentType = "single" | "bulk";
-type PartnerType = "Tailor" | "Fabric Provider" | "Project";
+type PartnerType = "Tailor" | "Fabric Provider" | "Designer" | "Project";
+type DesiredRoleFilter = "MAKER" | "FABRIC_PROVIDER" | "BOTH" | "DESIGNER";
 
 const roleOptions: Role[] = ["designer", "maker", "tailor", "customer"];
 
@@ -13,6 +15,7 @@ interface Candidate {
   name: string;
   role: Role;
   title: string;
+  collabCategory?: string;
   location: string;
   priceTier: "$" | "$$" | "$$$";
   rating: number;
@@ -32,7 +35,6 @@ interface Props {
   onSubmitted?: () => void;
 }
 
-const garmentTypes = ["Dress", "Blouse", "Suit", "Shirt", "Skirt", "Pants", "Jacket", "Other"];
 const fabricTypes = ["Cotton", "Linen", "Silk", "Wool", "Denim", "Synthetic", "Other"];
 
 const parseDdMmYyyyToIso = (value: string) => {
@@ -66,6 +68,7 @@ const formatDateIndia = (value: string) => {
 };
 
 const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
+  const { user } = useAuth();
   const [requesterRole, setRequesterRole] = useState<Role>("designer");
   const [targetRole, setTargetRole] = useState<Role>("maker");
   const [collabMode, setCollabMode] = useState<CollabMode>("tailor");
@@ -80,15 +83,40 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
   const [submitting, setSubmitting] = useState(false);
   const [pendingExists, setPendingExists] = useState(false);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [selectedCandidates, setSelectedCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [garmentType, setGarmentType] = useState("");
   const [fabricType, setFabricType] = useState("");
   const [measurements, setMeasurements] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
-  const [desiredRoleFilter, setDesiredRoleFilter] = useState<"MAKER" | "FABRIC_PROVIDER">("MAKER");
+  const [desiredRoleFilter, setDesiredRoleFilter] = useState<DesiredRoleFilter>("MAKER");
   const [prefilledFromPost, setPrefilledFromPost] = useState(false);
+  const isProjectMode = collabMode === "project" || partnerType === "Project";
+  const upperRoles = (user?.roles || []).map((r) => String(r).toUpperCase());
+  const primaryRole = (user?.active_role || "").toUpperCase();
+  const isDesignerUser =
+    primaryRole === "CREATOR" ||
+    primaryRole === "DESIGNER" ||
+    upperRoles.includes("CREATOR") ||
+    upperRoles.includes("DESIGNER");
+  const isMakerUser = !isDesignerUser && upperRoles.includes("MAKER");
+
+  // If logged-in user is a tailor, default to collaborating with designers
+  useEffect(() => {
+    if (isDesignerUser) {
+      setPartnerType("Tailor");
+      setCollabMode("tailor");
+      setRolesNeeded(["Tailor"]);
+      setDesiredRoleFilter("MAKER");
+    } else {
+      // Maker (including fabric provider): show designers/fabric providers, default Designer
+      setPartnerType("Designer");
+      setCollabMode("tailor");
+      setRolesNeeded(["Designer"]);
+      setDesiredRoleFilter("DESIGNER");
+    }
+  }, [isDesignerUser, isMakerUser]);
 
   // lock background scroll while modal is open
   useEffect(() => {
@@ -119,45 +147,88 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
     const loadCandidates = async () => {
       setLoading(true);
       try {
-        const res = await apiClient.get("/profile/search", {
-          params: {
-            role: "MAKER",
-            collab_category: desiredRoleFilter === "FABRIC_PROVIDER" ? "CLOTH_PROVIDER" : "TAILOR",
-            limit: 20,
-          },
+        // Fetch all and filter client-side to avoid missing designers
+        const res = await apiClient.get("/profile/search", { params: { limit: 50 } });
+        let items: any[] = res.data?.items || [];
+        const seen = new Set<string>();
+        items = items.filter((i) => {
+          if (seen.has(i.id)) return false;
+          seen.add(i.id);
+          return true;
         });
-        const items = res.data?.items || [];
+
         const filtered = items.filter((i: any) => {
-          const roles: string[] = i.roles || [];
-          const primary = (i.primary_role || "").toUpperCase();
           const collabCat = (i.collab_category || "").toUpperCase().trim();
-          if (desiredRoleFilter === "FABRIC_PROVIDER") {
+          const primary = (i.primary_role || "").toUpperCase().trim();
+          const rolesUpper = (i.roles || []).map((r: string) => r.toUpperCase());
+          const isDesigner =
+            primary === "DESIGNER" ||
+            primary === "CREATOR" ||
+            collabCat === "DESIGNER" ||
+            rolesUpper.includes("CREATOR") ||
+            rolesUpper.includes("DESIGNER");
+
+          if (partnerType === "Designer") {
+            return isDesigner;
+          }
+          if (partnerType === "Fabric Provider") {
             return collabCat === "CLOTH_PROVIDER";
           }
-          // Tailor view: only tailors
-          if (collabCat !== "TAILOR") return false;
-          return primary === "MAKER" || roles.includes("MAKER");
+          if (partnerType === "Tailor") {
+            return collabCat === "TAILOR";
+          }
+          // Project
+          if (isDesignerUser) {
+            // Designer login: show tailors + fabric providers
+            return collabCat === "TAILOR" || collabCat === "CLOTH_PROVIDER";
+          }
+          if (isMakerUser) {
+            // Maker login (including fabric provider): show designers + fabric providers + tailors
+            return isDesigner || collabCat === "CLOTH_PROVIDER" || collabCat === "TAILOR";
+          }
+          // Default: designers + tailors
+          return isDesigner || collabCat === "TAILOR";
         });
-        const mapped: Candidate[] = filtered.map((i: any) => ({
-          id: i.id,
-          name: i.display_name || i.handle || i.id,
-          role: "maker",
-          title:
-            (i.collab_category || "").toUpperCase() === "CLOTH_PROVIDER"
+
+        const mapped: Candidate[] = filtered.map((i: any) => {
+          const collabCat = (i.collab_category || "").toUpperCase().trim();
+          const primary = (i.primary_role || "").toUpperCase().trim();
+          const rolesUpper = (i.roles || []).map((r: string) => r.toUpperCase());
+          const isDesigner =
+            primary === "DESIGNER" ||
+            primary === "CREATOR" ||
+            collabCat === "DESIGNER" ||
+            rolesUpper.includes("CREATOR") ||
+            rolesUpper.includes("DESIGNER");
+          return {
+            id: i.id,
+            name: i.display_name || i.handle || i.id,
+            role: isDesigner ? "designer" : collabCat === "CLOTH_PROVIDER" ? "maker" : "tailor",
+            title: isDesigner
+              ? "Designer"
+              : collabCat === "CLOTH_PROVIDER"
               ? "Fabric Provider"
-              : (i.collab_category || "").toUpperCase() === "TAILOR"
+              : collabCat === "TAILOR"
               ? "Tailor"
               : i.primary_role || "Maker",
-          location: i.country_code || "Unknown",
-          priceTier: "$$",
-          rating: 4.8,
-          reviews: 20,
-          response: "< 4 hours",
-          badges: ["Quality Guaranteed"],
-          avatar: i.avatar_url,
-        }));
+            collabCategory: collabCat || undefined,
+            location: i.country_code || "Unknown",
+            priceTier: "$$",
+            rating: 4.8,
+            reviews: 20,
+            response: "< 4 hours",
+            badges: ["Quality Guaranteed"],
+            avatar: i.avatar_url,
+          };
+        });
         setCandidates(mapped);
-        setSelectedCandidate(mapped[0] || null);
+        setSelectedCandidates((prev) => {
+          if (isProjectMode) {
+            const prevIds = new Set(prev.map((p) => p.id));
+            return mapped.filter((m) => prevIds.has(m.id));
+          }
+          return mapped[0] ? [mapped[0]] : [];
+        });
       } catch (err) {
         console.error("Failed to load candidates", err);
       } finally {
@@ -165,7 +236,7 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
       }
     };
     loadCandidates();
-  }, [desiredRoleFilter]);
+  }, [desiredRoleFilter, isProjectMode, partnerType]);
 
   // Prefill garment type from post title for single-item flows
   useEffect(() => {
@@ -176,6 +247,8 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
   }, [prefilledFromPost, garmentType, post.title]);
 
   const formattedDeliveryDate = formatDateIndia(deliveryDate);
+  const selectedPrimary = selectedCandidates[0] || null;
+  const hasSelection = selectedCandidates.length > 0;
 
   const buildMessage = () => {
     const rolesLine =
@@ -201,8 +274,7 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
     return lines.join("\n");
   };
 
-  const canContinueStep2 =
-    selectedCandidate && !pendingExists;
+  const canContinueStep2 = hasSelection && !pendingExists;
 
   const deliveryIso = parseDdMmYyyyToIso(deliveryDate);
   const canContinueStep3 =
@@ -217,17 +289,32 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
   const submit = async () => {
     setSubmitting(true);
     try {
-      await apiClient.post("/collaboration/requests", {
+      const commonPayload = {
         source_type: "post",
         post_id: post.id,
-        target_user_id: selectedCandidate?.id,
         requester_role: requesterRole,
-        target_role: selectedCandidate?.role ?? targetRole,
         message: buildMessage(),
         budget_min: budgetMin ? Number(budgetMin) : undefined,
         budget_max: undefined,
         delivery_date: deliveryIso,
-      });
+      };
+
+      if (isProjectMode) {
+        await apiClient.post("/collaboration/requests", {
+          ...commonPayload,
+          targets: selectedCandidates.map((c) => ({
+            target_user_id: c.id,
+            target_role: c.role,
+          })),
+        });
+      } else {
+        await apiClient.post("/collaboration/requests", {
+          ...commonPayload,
+          target_user_id: selectedPrimary?.id,
+          requester_role: requesterRole,
+          target_role: selectedPrimary?.role ?? targetRole,
+        });
+      }
       onSubmitted?.();
       onClose();
     } catch (err) {
@@ -249,6 +336,8 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
                 ? "Ask a Tailor"
                 : partnerType === "Fabric Provider"
                 ? "Request Fabric"
+                : partnerType === "Designer"
+                ? "Collaborate with a Designer"
                 : "Start a Project"}
             </h3>
             <p className="text-sm text-white/70">Design: {post.title}</p>
@@ -293,27 +382,52 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
                     if (next === "Project") {
                       setCollabMode("project");
                       setRolesNeeded(["Tailor", "Fabric Provider"]);
-                      setDesiredRoleFilter("MAKER"); // start with tailors list
+                      setDesiredRoleFilter("BOTH"); // show both tailors and fabric providers
+                    } else if (next === "Designer") {
+                      setCollabMode("tailor");
+                      setRolesNeeded(["Designer"]);
+                      setDesiredRoleFilter("DESIGNER");
                     } else {
                       setCollabMode("tailor");
                       setRolesNeeded(next === "Tailor" ? ["Tailor"] : ["Fabric Provider"]);
                       setDesiredRoleFilter(next === "Tailor" ? "MAKER" : "FABRIC_PROVIDER");
                     }
+                    setSelectedCandidates([]);
                   }}
                   className="rounded-lg bg-slate-900 border border-white/10 text-white px-3 py-2"
                 >
-                  <option value="Tailor">Tailor</option>
-                  <option value="Fabric Provider">Fabric Provider</option>
-                  <option value="Project">Start a Project</option>
+                  {isDesignerUser ? (
+                    <>
+                      <option value="Tailor">Tailor</option>
+                      <option value="Fabric Provider">Fabric Provider</option>
+                      <option value="Project">Start a Project</option>
+                    </>
+                  ) : isMakerUser ? (
+                    <>
+                      <option value="Tailor">Tailor</option>
+                      <option value="Designer">Designer</option>
+                      <option value="Fabric Provider">Fabric Provider</option>
+                      <option value="Project">Start a Project</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="Tailor">Tailor</option>
+                      <option value="Fabric Provider">Fabric Provider</option>
+                      <option value="Designer">Designer</option>
+                      <option value="Project">Start a Project</option>
+                    </>
+                  )}
                 </select>
               </div>
             </div>
             <div className="grid gap-3 max-h-96 overflow-y-auto">
-          {(candidates.length ? candidates : []).map((c) => (
+          {(candidates.length ? candidates : []).map((c) => {
+              const isSelected = selectedCandidates.some((sc) => sc.id === c.id);
+              return (
                 <div
                   key={c.id}
                   className={`rounded-2xl border ${
-                    selectedCandidate?.id === c.id ? "border-fuchsia-500/60 bg-fuchsia-600/5" : "border-white/10 bg-white/5"
+                    isSelected ? "border-fuchsia-500/60 bg-fuchsia-600/5" : "border-white/10 bg-white/5"
                   } p-4 flex gap-4`}
                 >
                   <img
@@ -341,26 +455,37 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
                       <span>📍 {c.location}</span>
                       <span>⏱ Responds {c.response}</span>
                     </div>
+                    {pendingExists && (
+                      <div className="text-xs text-amber-400 mt-2">
+                        Pending request already exists for this post.
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={() => {
-                      setSelectedCandidate(c);
-                      setTargetRole(c.role);
+                      if (isProjectMode) {
+                        setSelectedCandidates((prev) =>
+                          prev.some((p) => p.id === c.id) ? prev.filter((p) => p.id !== c.id) : [...prev, c]
+                        );
+                      } else {
+                        setSelectedCandidates([c]);
+                        setTargetRole(c.role);
+                      }
                     }}
                     className={`self-center px-4 py-2 rounded-lg text-sm font-semibold ${
-                      selectedCandidate?.id === c.id ? "bg-fuchsia-600 text-white" : "bg-white/10 text-white/80 hover:bg-white/20"
+                      isSelected ? "bg-fuchsia-600 text-white" : "bg-white/10 text-white/80 hover:bg-white/20"
                     }`}
                   >
-                    {selectedCandidate?.id === c.id ? "Selected" : "Select"}
+                    {isSelected ? (isProjectMode ? "Remove" : "Selected") : isProjectMode ? "Add" : "Select"}
                   </button>
                 </div>
-              ))}
+              );
+            })}
               {loading && <div className="text-sm text-white/60">Loading collaborators...</div>}
           {!loading && candidates.length === 0 && (
-            <div className="text-sm text-white/60">No makers found. Add makers to the platform to show here.</div>
+            <div className="text-sm text-white/60">No collaborators found for this selection.</div>
           )}
             </div>
-            {pendingExists && <div className="text-xs text-amber-400">Pending request already exists for this post.</div>}
           </div>
         )}
 
@@ -369,13 +494,17 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-white space-y-3">
               <div className="flex flex-wrap gap-3 items-center justify-between">
                 <div>
-                  <div className="text-sm text-white/60">Selected collaborator</div>
-                  <div className="flex items-center gap-3 mt-2">
-                    <div className="w-10 h-10 rounded-full bg-fuchsia-600/40 border border-fuchsia-500/50" />
-                    <div>
-                      <div className="font-semibold">{selectedCandidate?.name}</div>
-                      <div className="text-sm text-white/70">{selectedCandidate?.title}</div>
-                    </div>
+                  <div className="text-sm text-white/60">Selected collaborator{isProjectMode ? "s" : ""}</div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {selectedCandidates.length === 0 && <div className="text-xs text-white/50">None selected</div>}
+                    {selectedCandidates.map((sc) => (
+                      <span
+                        key={sc.id}
+                        className="px-3 py-1 rounded-full bg-fuchsia-600/20 text-white border border-fuchsia-400/60 text-xs"
+                      >
+                        {sc.name} — {sc.title}
+                      </span>
+                    ))}
                   </div>
                 </div>
                 {partnerType === "Project" && (
@@ -390,6 +519,10 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
                           setRolesNeeded(["Tailor"]);
                           setPartnerType("Tailor");
                           setDesiredRoleFilter("MAKER");
+                          setSelectedCandidates((prev) => (prev[0] ? [prev[0]] : []));
+                        } else {
+                          setRolesNeeded(["Tailor", "Fabric Provider"]);
+                          setDesiredRoleFilter("BOTH");
                         }
                       }}
                       className="mt-1 rounded-lg bg-slate-900 border border-white/10 text-white px-2 py-1 text-sm"
@@ -588,7 +721,12 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
               <div className="text-sm text-white/60 mb-2">Project Summary</div>
               <div className="space-y-1 text-sm">
                 <div><span className="text-white/60">Design:</span> {post.title}</div>
-                <div><span className="text-white/60">Tailor:</span> {selectedCandidate?.name}</div>
+                <div>
+                  <span className="text-white/60">Collaborators:</span>{" "}
+                  {selectedCandidates.length
+                    ? selectedCandidates.map((c) => c.name).join(", ")
+                    : "—"}
+                </div>
                 <div><span className="text-white/60">Garment Type:</span> {garmentType}</div>
                 <div><span className="text-white/60">Fabric Type:</span> {fabricType}</div>
                 <div><span className="text-white/60">Budget:</span> {budgetMin || "—"}</div>
