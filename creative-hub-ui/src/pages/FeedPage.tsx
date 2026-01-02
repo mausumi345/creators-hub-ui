@@ -44,7 +44,7 @@ const FeedPage = () => {
 
   const [showModal, setShowModal] = useState(false);
   const [detailPostId, setDetailPostId] = useState<string | null>(null);
-  const [collabPostId, setCollabPostId] = useState<string | null>(null);
+  const [collabPost, setCollabPost] = useState<Post | null>(null);
   const [, setLiking] = useState<string | null>(null);
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
 
@@ -323,7 +323,7 @@ const FeedPage = () => {
                       💬 Comment
                     </button>
                     <button
-                      onClick={() => setCollabPostId(post.id)}
+                      onClick={() => setCollabPost(post)}
                       className="text-sm text-white/80 hover:text-white px-3 py-1.5 rounded-lg border border-fuchsia-500/60 bg-fuchsia-600/20 hover:bg-fuchsia-600/30 transition-all"
                     >
                       🤝 Collaborate
@@ -343,10 +343,10 @@ const FeedPage = () => {
           await fetchPosts();
         }}
       />
-      {collabPostId && (
+      {collabPost && (
         <CollaborationRequestModal
-          postId={collabPostId}
-          onClose={() => setCollabPostId(null)}
+          post={collabPost}
+          onClose={() => setCollabPost(null)}
           onSubmitted={() => fetchPosts()}
         />
       )}
