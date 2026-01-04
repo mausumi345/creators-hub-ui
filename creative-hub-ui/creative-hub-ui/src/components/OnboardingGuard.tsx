@@ -46,45 +46,30 @@ const OnboardingGuard = ({ children }: OnboardingGuardProps) => {
         return;
       }
 
-      // Not authenticated - redirect to login if on protected onboarding pages
+      // If not authenticated and on onboarding, just allow (avoid flicker); otherwise allow
       if (!isAuthenticated) {
+        setCheckedOnboarding(true);
+        return;
+      }
+
+      // Roles onboarding first
+      if (user && (user.roles ?? []).length === 0) {
         if (isOnOnboardingPage) {
-          navigate("/login", { replace: true });
+          setCheckedOnboarding(true);
           return;
+        }
+        if (location.pathname !== "/onboarding/roles") {
+          navigate("/onboarding/roles", { replace: true });
         }
         setCheckedOnboarding(true);
         return;
       }
 
-       // Roles onboarding first
-       if (user && (user.roles ?? []).length === 0) {
-         if (location.pathname !== "/onboarding/roles") {
-           navigate("/onboarding/roles", { replace: true });
-         }
-         setCheckedOnboarding(true);
-         return;
-       }
-
       try {
         const response = await apiClient.get<ProfileData>("/profile/me");
         const profile = response.data;
 
-        // If onboarding completed and user is on onboarding pages:
-        // - Always allow /onboarding/roles (manage/add role)
-        // - Allow /onboarding/profile only when adding or editing a role (mode=add-role|edit-role) or allowProfileEdit flag
-        if (profile.onboarding_status === "COMPLETED" && isOnOnboardingPage) {
-          const isManageRoles = location.pathname === "/onboarding/roles";
-          const isProfilePage = location.pathname === "/onboarding/profile";
-          const isAddOrEditProfile =
-            isProfilePage && (modeParam === "add-role" || modeParam === "edit-role");
-          if (!isManageRoles && !isAddOrEditProfile && !allowProfileEdit) {
-            navigate("/feed", { replace: true });
-            setCheckedOnboarding(true);
-            return;
-          }
-        }
-
-        // Authenticated and on onboarding pages - allow access (including /onboarding/roles manage)
+        // Always allow onboarding pages once authed to avoid flicker
         if (isOnOnboardingPage) {
           setCheckedOnboarding(true);
           return;
@@ -117,7 +102,7 @@ const OnboardingGuard = ({ children }: OnboardingGuardProps) => {
     };
 
     checkOnboardingStatus();
-  }, [isAuthenticated, authLoading, isOnOnboardingPage, navigate]);
+  }, [isAuthenticated, authLoading, isOnOnboardingPage, navigate, allowProfileEdit, modeParam]);
 
   // Show loading while checking auth or profile
   if (authLoading || (!checkedOnboarding && (isAuthenticated || isOnOnboardingPage))) {

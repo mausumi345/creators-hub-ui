@@ -5,6 +5,7 @@ import { useRef, useCallback } from "react";
 import PostModal from "../components/PostModal";
 import PostDetailModal from "../components/PostDetailModal";
 import { usePostComments } from "../hooks/usePostComments";
+import CollaborationRequestModal from "../components/CollaborationRequestModal";
 
 type Post = {
   id: string;
@@ -15,12 +16,12 @@ type Post = {
   created_as_role?: string | null;
   owner_id?: string | null;
   author_name?: string | null;
-  tags?: string[];
+  // tags from backend; use TagOut[]
+  tags?: TagOut[];
   created_at?: string;
   media_url?: string | null;
   likes_count?: number;
   liked_by_me?: boolean;
-  tags?: TagOut[];
 };
 
 type LikeInfo = {
@@ -43,6 +44,7 @@ const FeedPage = () => {
 
   const [showModal, setShowModal] = useState(false);
   const [detailPostId, setDetailPostId] = useState<string | null>(null);
+  const [collabPost, setCollabPost] = useState<Post | null>(null);
   const [, setLiking] = useState<string | null>(null);
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
 
@@ -320,6 +322,12 @@ const FeedPage = () => {
                     >
                       💬 Comment
                     </button>
+                    <button
+                      onClick={() => setCollabPost(post)}
+                      className="text-sm text-white/80 hover:text-white px-3 py-1.5 rounded-lg border border-fuchsia-500/60 bg-fuchsia-600/20 hover:bg-fuchsia-600/30 transition-all"
+                    >
+                      🤝 Collaborate
+                    </button>
                   </div>
                 </div>
               ))}
@@ -335,6 +343,13 @@ const FeedPage = () => {
           await fetchPosts();
         }}
       />
+      {collabPost && (
+        <CollaborationRequestModal
+          post={collabPost}
+          onClose={() => setCollabPost(null)}
+          onSubmitted={() => fetchPosts()}
+        />
+      )}
       <PostDetailModal postId={detailPostId} onClose={() => setDetailPostId(null)} />
     </div>
   );

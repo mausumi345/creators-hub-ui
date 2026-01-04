@@ -80,8 +80,8 @@ const PostModal = ({ isOpen, onClose, onCreated }: PostModalProps) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-      <div className="w-full max-w-2xl rounded-2xl border border-white/15 bg-black/80 text-white shadow-2xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+      <div className="w-full max-w-2xl max-h-[90vh] rounded-2xl border border-white/15 bg-black/80 text-white shadow-2xl flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 sticky top-0 bg-black/80 z-10">
           <h2 className="text-lg font-semibold">Create a post</h2>
           <button
             onClick={onClose}
@@ -90,7 +90,7 @@ const PostModal = ({ isOpen, onClose, onCreated }: PostModalProps) => {
             ✕
           </button>
         </div>
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
           {error && (
             <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
               {error}
@@ -176,7 +176,7 @@ const PostModal = ({ isOpen, onClose, onCreated }: PostModalProps) => {
             </div>
           )}
         </div>
-        <div className="flex items-center justify-between px-5 py-4 border-t border-white/10">
+        <div className="flex items-center justify-between px-5 py-4 border-t border-white/10 sticky bottom-0 bg-black/80 z-10">
           <button
             onClick={onClose}
             className="text-sm text-white/70 hover:text-white px-4 py-2 rounded-xl border border-white/15 hover:border-white/30 hover:bg-white/5 transition-all"

@@ -1,0 +1,796 @@
+import { useState, useEffect } from "react";
+import { apiClient } from "../lib/apiClient";
+import { useAuth } from "../contexts/AuthContext";
+
+type Role = "designer" | "maker" | "tailor" | "customer";
+type CollabMode = "tailor" | "project";
+type FulfillmentType = "single" | "bulk";
+type PartnerType = "Tailor" | "Fabric Provider" | "Designer" | "Project";
+type DesiredRoleFilter = "MAKER" | "FABRIC_PROVIDER" | "BOTH" | "DESIGNER";
+
+const roleOptions: Role[] = ["designer", "maker", "tailor", "customer"];
+
+interface Candidate {
+  id: string;
+  name: string;
+  role: Role;
+  title: string;
+  collabCategory?: string;
+  location: string;
+  priceTier: "$" | "$$" | "$$$";
+  rating: number;
+  reviews: number;
+  response: string;
+  badges: string[];
+  avatar?: string;
+}
+
+interface Props {
+  post: {
+    id: string;
+    title: string;
+    description?: string | null;
+  };
+  onClose: () => void;
+  onSubmitted?: () => void;
+}
+
+const fabricTypes = ["Cotton", "Linen", "Silk", "Wool", "Denim", "Synthetic", "Other"];
+
+const parseDdMmYyyyToIso = (value: string) => {
+  if (!value) return null;
+  const parts = value.trim().split(/[/-]/);
+  if (parts.length !== 3) return null;
+  const [dd, mm, yyyy] = parts;
+  if (!dd || !mm || !yyyy) return null;
+  const day = Number(dd);
+  const month = Number(mm);
+  const year = Number(yyyy);
+  if (!day || !month || !year) return null;
+  const iso = `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day
+    .toString()
+    .padStart(2, "0")}`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return iso;
+};
+
+const formatDateIndia = (value: string) => {
+  if (!value) return "";
+  const iso = parseDdMmYyyyToIso(value) || value; // fall back to raw value if already ISO
+  const parsed = new Date(iso);
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(parsed);
+};
+
+const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
+  const { user } = useAuth();
+  const [requesterRole, setRequesterRole] = useState<Role>("designer");
+  const [targetRole, setTargetRole] = useState<Role>("maker");
+  const [collabMode, setCollabMode] = useState<CollabMode>("tailor");
+  const [rolesNeeded, setRolesNeeded] = useState<string[]>(["Tailor"]);
+  const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>("single");
+  const [quantity, setQuantity] = useState("");
+  const [sizeBreakdown, setSizeBreakdown] = useState("");
+  const [partnerType, setPartnerType] = useState<PartnerType>("Tailor");
+  const [colors, setColors] = useState("");
+  const [message, setMessage] = useState("");
+  const [budgetMin, setBudgetMin] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingExists, setPendingExists] = useState(false);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [selectedCandidates, setSelectedCandidates] = useState<Candidate[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [garmentType, setGarmentType] = useState("");
+  const [fabricType, setFabricType] = useState("");
+  const [measurements, setMeasurements] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [desiredRoleFilter, setDesiredRoleFilter] = useState<DesiredRoleFilter>("MAKER");
+  const [prefilledFromPost, setPrefilledFromPost] = useState(false);
+  const isProjectMode = collabMode === "project" || partnerType === "Project";
+  const upperRoles = (user?.roles || []).map((r) => String(r).toUpperCase());
+  const primaryRole = (user?.active_role || "").toUpperCase();
+  const isDesignerUser =
+    primaryRole === "CREATOR" ||
+    primaryRole === "DESIGNER" ||
+    upperRoles.includes("CREATOR") ||
+    upperRoles.includes("DESIGNER");
+  const isMakerUser = !isDesignerUser && upperRoles.includes("MAKER");
+
+  // If logged-in user is a tailor, default to collaborating with designers
+  useEffect(() => {
+    if (isDesignerUser) {
+      setPartnerType("Tailor");
+      setCollabMode("tailor");
+      setRolesNeeded(["Tailor"]);
+      setDesiredRoleFilter("MAKER");
+    } else {
+      // Maker (including fabric provider): show designers/fabric providers, default Designer
+      setPartnerType("Designer");
+      setCollabMode("tailor");
+      setRolesNeeded(["Designer"]);
+      setDesiredRoleFilter("DESIGNER");
+    }
+  }, [isDesignerUser, isMakerUser]);
+
+  // lock background scroll while modal is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  useEffect(() => {
+    const checkPending = async () => {
+      try {
+        const res = await apiClient.get("/collaboration/requests", {
+          params: { box: "sent" },
+        });
+        const items = res.data?.items || res.data || [];
+        const match = items.find(
+          (r: any) =>
+            r.post_id === post.id &&
+            (r.status || "").toLowerCase() === "pending"
+        );
+        setPendingExists(Boolean(match));
+      } catch {
+        // ignore
+      }
+    };
+    checkPending();
+  }, [post.id]);
+
+  useEffect(() => {
+    const loadCandidates = async () => {
+      setLoading(true);
+      try {
+        // Fetch all and filter client-side to avoid missing designers
+        const res = await apiClient.get("/profile/search", { params: { limit: 50 } });
+        let items: any[] = res.data?.items || [];
+        const seen = new Set<string>();
+        items = items.filter((i) => {
+          if (seen.has(i.id)) return false;
+          seen.add(i.id);
+          return true;
+        });
+
+        const filtered = items.filter((i: any) => {
+          const collabCat = (i.collab_category || "").toUpperCase().trim();
+          const primary = (i.primary_role || "").toUpperCase().trim();
+          const rolesUpper = (i.roles || []).map((r: string) => r.toUpperCase());
+          const isDesigner =
+            primary === "DESIGNER" ||
+            primary === "CREATOR" ||
+            collabCat === "DESIGNER" ||
+            rolesUpper.includes("CREATOR") ||
+            rolesUpper.includes("DESIGNER");
+
+          if (partnerType === "Designer") {
+            return isDesigner;
+          }
+          if (partnerType === "Fabric Provider") {
+            return collabCat === "CLOTH_PROVIDER";
+          }
+          if (partnerType === "Tailor") {
+            return collabCat === "TAILOR";
+          }
+          // Project
+          if (isDesignerUser) {
+            // Designer login: show tailors + fabric providers
+            return collabCat === "TAILOR" || collabCat === "CLOTH_PROVIDER";
+          }
+          if (isMakerUser) {
+            // Maker login (including fabric provider): show designers + fabric providers + tailors
+            return isDesigner || collabCat === "CLOTH_PROVIDER" || collabCat === "TAILOR";
+          }
+          // Default: designers + tailors
+          return isDesigner || collabCat === "TAILOR";
+        });
+
+        const mapped: Candidate[] = filtered.map((i: any) => {
+          const collabCat = (i.collab_category || "").toUpperCase().trim();
+          const primary = (i.primary_role || "").toUpperCase().trim();
+          const rolesUpper = (i.roles || []).map((r: string) => r.toUpperCase());
+          const isDesigner =
+            primary === "DESIGNER" ||
+            primary === "CREATOR" ||
+            collabCat === "DESIGNER" ||
+            rolesUpper.includes("CREATOR") ||
+            rolesUpper.includes("DESIGNER");
+          return {
+            id: i.id,
+            name: i.display_name || i.handle || i.id,
+            role: isDesigner ? "designer" : collabCat === "CLOTH_PROVIDER" ? "maker" : "tailor",
+            title: isDesigner
+              ? "Designer"
+              : collabCat === "CLOTH_PROVIDER"
+              ? "Fabric Provider"
+              : collabCat === "TAILOR"
+              ? "Tailor"
+              : i.primary_role || "Maker",
+            collabCategory: collabCat || undefined,
+            location: i.country_code || "Unknown",
+            priceTier: "$$",
+            rating: 4.8,
+            reviews: 20,
+            response: "< 4 hours",
+            badges: ["Quality Guaranteed"],
+            avatar: i.avatar_url,
+          };
+        });
+        setCandidates(mapped);
+        setSelectedCandidates((prev) => {
+          if (isProjectMode) {
+            const prevIds = new Set(prev.map((p) => p.id));
+            return mapped.filter((m) => prevIds.has(m.id));
+          }
+          return mapped[0] ? [mapped[0]] : [];
+        });
+      } catch (err) {
+        console.error("Failed to load candidates", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadCandidates();
+  }, [desiredRoleFilter, isProjectMode, partnerType]);
+
+  // Prefill garment type from post title for single-item flows
+  useEffect(() => {
+    if (!prefilledFromPost && !garmentType && post.title) {
+      setGarmentType(post.title);
+      setPrefilledFromPost(true);
+    }
+  }, [prefilledFromPost, garmentType, post.title]);
+
+  const formattedDeliveryDate = formatDateIndia(deliveryDate);
+  const selectedPrimary = selectedCandidates[0] || null;
+  const hasSelection = selectedCandidates.length > 0;
+
+  const buildMessage = () => {
+    const rolesLine =
+      collabMode === "project" && rolesNeeded.length
+        ? `Roles needed: ${rolesNeeded.join(", ")}`
+        : `Roles needed: ${partnerType === "Fabric Provider" ? "Fabric Provider" : "Tailor"}`;
+    const fulfillmentLine =
+      fulfillmentType === "bulk"
+        ? `Fulfillment: Bulk, Quantity: ${quantity || "n/a"}${sizeBreakdown ? `, Sizes: ${sizeBreakdown}` : ""}`
+        : "Fulfillment: Single item";
+    const lines = [
+      `Design: ${post.title || post.id}`,
+      `Collaboration type: ${collabMode === "tailor" ? "Ask a Tailor" : "Start a Project"}`,
+      rolesLine,
+      fulfillmentLine,
+      message ? `Notes: ${message}` : null,
+      garmentType ? `Garment Type: ${garmentType}` : null,
+      fabricType ? `Fabric Type: ${fabricType}` : null,
+      colors ? `Color(s): ${colors}` : null,
+      measurements ? `Measurements/Instructions: ${measurements}` : null,
+      deliveryDate ? `Delivery Date (dd/mm/yyyy IST): ${formattedDeliveryDate}` : null,
+    ].filter(Boolean);
+    return lines.join("\n");
+  };
+
+  const canContinueStep2 = hasSelection && !pendingExists;
+
+  const deliveryIso = parseDdMmYyyyToIso(deliveryDate);
+  const canContinueStep3 =
+    canContinueStep2 &&
+    (collabMode === "project" ? garmentType : true) &&
+    fabricType &&
+    measurements &&
+    deliveryIso &&
+    budgetMin !== "" &&
+    (fulfillmentType === "single" || (fulfillmentType === "bulk" && Number(quantity) > 0));
+
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      const commonPayload = {
+        source_type: "post",
+        post_id: post.id,
+        requester_role: requesterRole,
+        message: buildMessage(),
+        budget_min: budgetMin ? Number(budgetMin) : undefined,
+        budget_max: undefined,
+        delivery_date: deliveryIso,
+      };
+
+      if (isProjectMode) {
+        await apiClient.post("/collaboration/requests", {
+          ...commonPayload,
+          targets: selectedCandidates.map((c) => ({
+            target_user_id: c.id,
+            target_role: c.role,
+          })),
+        });
+      } else {
+        await apiClient.post("/collaboration/requests", {
+          ...commonPayload,
+          target_user_id: selectedPrimary?.id,
+          requester_role: requesterRole,
+          target_role: selectedPrimary?.role ?? targetRole,
+        });
+      }
+      onSubmitted?.();
+      onClose();
+    } catch (err) {
+      console.error("Failed to send request", err);
+      alert("Failed to send collaboration request");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-4xl rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-fuchsia-500/30 p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h3 className="text-2xl font-semibold text-white">
+              {partnerType === "Tailor"
+                ? "Ask a Tailor"
+                : partnerType === "Fabric Provider"
+                ? "Request Fabric"
+                : partnerType === "Designer"
+                ? "Collaborate with a Designer"
+                : "Start a Project"}
+            </h3>
+            <p className="text-sm text-white/70">Design: {post.title}</p>
+          </div>
+          <button onClick={onClose} className="text-white/60 hover:text-white text-sm">
+            ✕
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3 mb-6 text-sm text-white/70">
+          {[1, 2, 3].map((s) => (
+            <div key={s} className="flex items-center gap-2">
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                  step === s ? "bg-fuchsia-600 text-white" : "bg-white/10 text-white/60"
+                }`}
+              >
+                {s}
+              </div>
+              {s < 3 && <div className="w-10 h-[2px] bg-white/20" />}
+            </div>
+          ))}
+        </div>
+
+        {step === 1 && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-sm text-white/70">Select a collaborator to work on this design.</p>
+                <p className="text-xs text-white/50">
+                  Start a Project: plan a full engagement with both tailoring and fabric sourcing. If you only need one role,
+                  pick Tailor or Fabric Provider instead.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-white/60">Looking for</span>
+                <select
+                  value={partnerType}
+                  onChange={(e) => {
+                    const next = e.target.value as PartnerType;
+                    setPartnerType(next);
+                    if (next === "Project") {
+                      setCollabMode("project");
+                      setRolesNeeded(["Tailor", "Fabric Provider"]);
+                      setDesiredRoleFilter("BOTH"); // show both tailors and fabric providers
+                    } else if (next === "Designer") {
+                      setCollabMode("tailor");
+                      setRolesNeeded(["Designer"]);
+                      setDesiredRoleFilter("DESIGNER");
+                    } else {
+                      setCollabMode("tailor");
+                      setRolesNeeded(next === "Tailor" ? ["Tailor"] : ["Fabric Provider"]);
+                      setDesiredRoleFilter(next === "Tailor" ? "MAKER" : "FABRIC_PROVIDER");
+                    }
+                    setSelectedCandidates([]);
+                  }}
+                  className="rounded-lg bg-slate-900 border border-white/10 text-white px-3 py-2"
+                >
+                  {isDesignerUser ? (
+                    <>
+                      <option value="Tailor">Tailor</option>
+                      <option value="Fabric Provider">Fabric Provider</option>
+                      <option value="Project">Start a Project</option>
+                    </>
+                  ) : isMakerUser ? (
+                    <>
+                      <option value="Tailor">Tailor</option>
+                      <option value="Designer">Designer</option>
+                      <option value="Fabric Provider">Fabric Provider</option>
+                      <option value="Project">Start a Project</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="Tailor">Tailor</option>
+                      <option value="Fabric Provider">Fabric Provider</option>
+                      <option value="Designer">Designer</option>
+                      <option value="Project">Start a Project</option>
+                    </>
+                  )}
+                </select>
+              </div>
+            </div>
+            <div className="grid gap-3 max-h-96 overflow-y-auto">
+          {(candidates.length ? candidates : []).map((c) => {
+              const isSelected = selectedCandidates.some((sc) => sc.id === c.id);
+              return (
+                <div
+                  key={c.id}
+                  className={`rounded-2xl border ${
+                    isSelected ? "border-fuchsia-500/60 bg-fuchsia-600/5" : "border-white/10 bg-white/5"
+                  } p-4 flex gap-4`}
+                >
+                  <img
+                    src={c.avatar}
+                    alt={c.name}
+                    className="w-14 h-14 rounded-full object-cover border border-white/10 bg-white/10"
+                  />
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-white font-semibold">{c.name}</div>
+                        <div className="text-sm text-fuchsia-200">{c.title}</div>
+                      </div>
+                      <div className="text-sm text-emerald-300 font-semibold">{c.priceTier}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {c.badges.map((b) => (
+                        <span key={b} className="px-2 py-1 rounded-full bg-purple-600/30 text-purple-100 border border-purple-500/50">
+                          {b}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="text-xs text-white/70 flex gap-4">
+                      <span>⭐ {c.rating} ({c.reviews} reviews)</span>
+                      <span>📍 {c.location}</span>
+                      <span>⏱ Responds {c.response}</span>
+                    </div>
+                    {pendingExists && (
+                      <div className="text-xs text-amber-400 mt-2">
+                        Pending request already exists for this post.
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (isProjectMode) {
+                        setSelectedCandidates((prev) =>
+                          prev.some((p) => p.id === c.id) ? prev.filter((p) => p.id !== c.id) : [...prev, c]
+                        );
+                      } else {
+                        setSelectedCandidates([c]);
+                        setTargetRole(c.role);
+                      }
+                    }}
+                    className={`self-center px-4 py-2 rounded-lg text-sm font-semibold ${
+                      isSelected ? "bg-fuchsia-600 text-white" : "bg-white/10 text-white/80 hover:bg-white/20"
+                    }`}
+                  >
+                    {isSelected ? (isProjectMode ? "Remove" : "Selected") : isProjectMode ? "Add" : "Select"}
+                  </button>
+                </div>
+              );
+            })}
+              {loading && <div className="text-sm text-white/60">Loading collaborators...</div>}
+          {!loading && candidates.length === 0 && (
+            <div className="text-sm text-white/60">No collaborators found for this selection.</div>
+          )}
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-white space-y-3">
+              <div className="flex flex-wrap gap-3 items-center justify-between">
+                <div>
+                  <div className="text-sm text-white/60">Selected collaborator{isProjectMode ? "s" : ""}</div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {selectedCandidates.length === 0 && <div className="text-xs text-white/50">None selected</div>}
+                    {selectedCandidates.map((sc) => (
+                      <span
+                        key={sc.id}
+                        className="px-3 py-1 rounded-full bg-fuchsia-600/20 text-white border border-fuchsia-400/60 text-xs"
+                      >
+                        {sc.name} — {sc.title}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                {partnerType === "Project" && (
+                  <div className="space-y-1 text-xs">
+                    <div className="text-white/60">Collaboration type</div>
+                    <select
+                      value={collabMode}
+                      onChange={(e) => {
+                        const next = e.target.value as CollabMode;
+                        setCollabMode(next);
+                        if (next === "tailor") {
+                          setRolesNeeded(["Tailor"]);
+                          setPartnerType("Tailor");
+                          setDesiredRoleFilter("MAKER");
+                          setSelectedCandidates((prev) => (prev[0] ? [prev[0]] : []));
+                        } else {
+                          setRolesNeeded(["Tailor", "Fabric Provider"]);
+                          setDesiredRoleFilter("BOTH");
+                        }
+                      }}
+                      className="mt-1 rounded-lg bg-slate-900 border border-white/10 text-white px-2 py-1 text-sm"
+                    >
+                      <option value="project">Tailor + Fabric Provider</option>
+                      <option value="tailor">Tailor only</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {collabMode === "project" && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                  {["Tailor", "Fabric Provider"].map((role) => (
+                    <label key={role} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={rolesNeeded.includes(role)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setRolesNeeded((prev) => Array.from(new Set([...prev, role])));
+                          } else {
+                            setRolesNeeded((prev) => prev.filter((r) => r !== role));
+                          }
+                        }}
+                      />
+                      <span className="text-white/80">{role}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-white/60">Your role</label>
+                <select
+                  value={requesterRole}
+                  onChange={(e) => setRequesterRole(e.target.value as Role)}
+                  className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                >
+                  {roleOptions.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-white/60">Target role</label>
+                <select
+                  value={targetRole}
+                  onChange={(e) => setTargetRole(e.target.value as Role)}
+                  className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                >
+                  {roleOptions.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-white/60">
+                Garment Type (from post)
+              </label>
+              <input
+                value={garmentType}
+                readOnly
+                className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2 opacity-90"
+                placeholder="Filled from post title"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-white/60">Fabric Type *</label>
+              <select
+                value={fabricType}
+                onChange={(e) => setFabricType(e.target.value)}
+                className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+              >
+                <option value="">Select fabric type</option>
+                {fabricTypes.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs text-white/60">Measurements / Notes *</label>
+              <textarea
+                value={measurements}
+                onChange={(e) => setMeasurements(e.target.value)}
+                className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                rows={3}
+                placeholder="e.g., Bust: 36in, Waist: 28in, Hip: 38in or special instructions..."
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-white/60">Budget *</label>
+                <input
+                  type="number"
+                  value={budgetMin}
+                  onChange={(e) => setBudgetMin(e.target.value)}
+                  className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-white/60">Delivery Date * (dd/mm/yyyy, IST)</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="dd/mm/yyyy"
+                  value={deliveryDate}
+                  onChange={(e) => setDeliveryDate(e.target.value)}
+                  className={`mt-1 w-full rounded-lg bg-slate-900 border ${deliveryDate && !deliveryIso ? "border-red-500/70" : "border-white/10"} text-white p-2`}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-white/60">Color(s)</label>
+                <input
+                  type="text"
+                  value={colors}
+                  onChange={(e) => setColors(e.target.value)}
+                  className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                  placeholder="e.g., Navy; or Red/Blue mix"
+                />
+              </div>
+              <div />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-white/60">Fulfillment type</label>
+                <select
+                  value={fulfillmentType}
+                  onChange={(e) => setFulfillmentType(e.target.value as FulfillmentType)}
+                  className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                >
+                  <option value="single">Single item</option>
+                  <option value="bulk">Bulk</option>
+                </select>
+              </div>
+              {fulfillmentType === "bulk" && (
+                <div>
+                  <label className="text-xs text-white/60">Quantity (required for bulk)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                  />
+                </div>
+              )}
+            </div>
+
+            {fulfillmentType === "bulk" && (
+              <div>
+                <label className="text-xs text-white/60">Size & color breakdown (optional)</label>
+                <textarea
+                  value={sizeBreakdown}
+                  onChange={(e) => setSizeBreakdown(e.target.value)}
+                  className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                  rows={2}
+                  placeholder="e.g., S/Red:10, M/Red:15, L/Blue:5 or Fabric: Navy 50m, Lining: Ivory 30m"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs text-white/60">Additional Notes (optional)</label>
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                rows={2}
+                placeholder="Share context, references, timelines..."
+              />
+            </div>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-4 text-white">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="text-sm text-white/60 mb-2">Project Summary</div>
+              <div className="space-y-1 text-sm">
+                <div><span className="text-white/60">Design:</span> {post.title}</div>
+                <div>
+                  <span className="text-white/60">Collaborators:</span>{" "}
+                  {selectedCandidates.length
+                    ? selectedCandidates.map((c) => c.name).join(", ")
+                    : "—"}
+                </div>
+                <div><span className="text-white/60">Garment Type:</span> {garmentType}</div>
+                <div><span className="text-white/60">Fabric Type:</span> {fabricType}</div>
+                <div><span className="text-white/60">Budget:</span> {budgetMin || "—"}</div>
+                <div><span className="text-white/60">Delivery Date:</span> {formattedDeliveryDate || "—"}</div>
+                <div><span className="text-white/60">Notes:</span> {measurements || message || "—"}</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-between items-center mt-6">
+          <button
+            onClick={() => {
+              if (step === 1) onClose();
+              else setStep((prev) => (prev === 1 ? 1 : ((prev - 1) as 1 | 2 | 3)));
+            }}
+            className="px-4 py-2 rounded-lg bg-slate-800 text-white/80 hover:text-white"
+            disabled={submitting}
+          >
+            {step === 1 ? "Cancel" : "Back"}
+          </button>
+          <div className="flex gap-3">
+            {step < 3 && (
+              <button
+                onClick={() => {
+                  if (step === 1 && canContinueStep2) setStep(2);
+                  if (step === 2 && canContinueStep3) setStep(3);
+                }}
+                disabled={step === 1 ? !canContinueStep2 : !canContinueStep3}
+                className="px-5 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white disabled:opacity-50"
+              >
+                Continue
+              </button>
+            )}
+            {step === 3 && (
+              <button
+                onClick={submit}
+                disabled={submitting || pendingExists}
+                className="px-5 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white disabled:opacity-50"
+              >
+                {pendingExists
+                  ? "Pending..."
+                  : submitting
+                    ? "Sending..."
+                    : partnerType === "Fabric Provider"
+                      ? "Send to Fabric Provider"
+                      : partnerType === "Designer"
+                        ? "Send to Designer"
+                        : partnerType === "Project" || collabMode === "project"
+                          ? "Send Project"
+                          : "Send to Tailor"}
+              </button>
+            )}
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default CollaborationRequestModal;
+
