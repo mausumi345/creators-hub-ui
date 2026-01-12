@@ -41,19 +41,7 @@ const DashboardPage = () => {
             <div className="text-3xl font-bold">My Workspace</div>
             <div className="text-white/60 mt-1">Track orders, collaborations, and notifications</div>
           </div>
-          <div className="flex gap-2">
-            {["notifications"].map((key) => (
-              <button
-                key={key}
-                onClick={() => setTab(key as any)}
-                className={`px-4 py-2 rounded-full text-sm font-semibold transition ${
-                  tab === key ? "bg-fuchsia-600 text-white" : "bg-white/5 text-white/70 hover:bg-white/10"
-                }`}
-              >
-                Notifications
-              </button>
-            ))}
-          </div>
+          <div className="flex gap-2" />
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-8">

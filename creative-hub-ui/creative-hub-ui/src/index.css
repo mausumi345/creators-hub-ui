@@ -2,8 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Slightly smaller base size for a tighter, Stripe-like feel */
+  font-size: 15px;
+  --sidebar-width: 15rem;
+  /* Mix button gradient with a dark base fade */
+  --sidebar-gradient: linear-gradient(180deg, #7c3aed 0%, #c026d3 45%, #151826 100%);
+  --sidebar-active: rgba(255, 255, 255, 0.16);
+  --sidebar-hover: rgba(255, 255, 255, 0.11);
+}
+
 body {
-  @apply bg-brand-dark text-white;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  @apply text-white/90;
+  background: linear-gradient(180deg, #0f111a 0%, #111827 100%);
+  font-family: "Inter", "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2 {
+  color: #e9ecf5;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-rendering: optimizeLegibility;
 }

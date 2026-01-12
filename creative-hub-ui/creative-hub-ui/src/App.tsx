@@ -17,6 +17,9 @@ import CollaborationPage from "./pages/CollaborationPage";
 import ChatPage from "./pages/ChatPage";
 import DashboardPage from "./pages/DashboardPage";
 import UserProfilePage from "./pages/UserProfilePage";
+import OrdersPage from "./pages/OrdersPage";
+import OrderDetailPage from "./pages/OrderDetailPage";
+import TransactionsPage from "./pages/TransactionsPage";
 
 function App() {
   return (
@@ -39,6 +42,9 @@ function App() {
             <Route path="/chat/:threadId" element={<ChatPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/profile" element={<UserProfilePage />} />
+            <Route path="/orders" element={<OrdersPage />} />
+            <Route path="/orders/:orderId" element={<OrderDetailPage />} />
+            <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />

@@ -96,45 +96,22 @@ const TopBar = () => {
   const unreadCount = notifications.filter((n) => n.status !== "read").length;
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 h-16 px-6 flex items-center justify-between bg-black/80 backdrop-blur-xl border-b border-white/10">
-      {/* Logo & Brand */}
-      <Link to="/" className="flex items-center gap-3 group">
-        <Logo size={40} className="group-hover:scale-105 transition-transform" />
-        <span className="text-white font-semibold text-lg tracking-tight">
-          Creative Hub
-        </span>
+    <header
+      className="fixed top-0 left-0 right-0 z-50 h-16 pr-4 sm:pr-6 flex items-center justify-between bg-black/80 backdrop-blur-xl border-b border-white/10"
+      style={{ paddingLeft: "20px" }}
+    >
+      {/* Left: Logo */}
+      <Link to="/" className="flex items-center gap-2 group">
+        <Logo size={32} className="group-hover:scale-105 transition-transform" />
+        <span className="text-white/85 text-sm font-semibold hidden sm:inline">Creative Hub</span>
       </Link>
 
-      {/* Right side */}
-      <div className="flex items-center gap-4">
+      {/* Right: Notifications + Profile / Auth buttons */}
+      <div className="flex items-center gap-3">
         {isLoading ? (
           <span className="text-xs text-white/50">Loading…</span>
         ) : isAuthenticated ? (
-          // Logged in state
-          <div className="flex items-center gap-4">
-            <nav className="hidden md:flex items-center gap-2 text-sm">
-              {[
-                { label: "Dashboard", to: "/dashboard" },
-                { label: "Profile", to: "/profile" },
-                { label: "Collab", to: "/collaboration" },
-                { label: "Feed", to: "/feed" },
-              ].map((item) => {
-                const active = location.pathname.startsWith(item.to);
-                return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    className={`px-3 py-2 rounded-lg ${
-                      active ? "bg-white/10 text-white" : "text-white/70 hover:text-white hover:bg-white/5"
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </nav>
-
-            {/* Notifications */}
+          <>
             <div className="relative">
               <button
                 onClick={() => setIsNotifOpen((v) => !v)}
@@ -169,16 +146,14 @@ const TopBar = () => {
             <div className="relative">
               <button
                 onClick={() => setIsUserMenuOpen((v) => !v)}
-                className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-white/5 transition-colors"
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/5 transition-colors"
+                aria-label="User menu"
               >
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white text-sm font-semibold shadow-lg shadow-violet-500/30">
                   {initial}
                 </div>
-                <span className="text-sm text-white/80 hidden sm:block">
-                  {email}
-                </span>
                 <svg
-                  className={`w-3 h-3 ml-1 text-white/60 transition-transform ${isUserMenuOpen ? "rotate-180" : ""}`}
+                  className={`w-3 h-3 text-white/60 transition-transform ${isUserMenuOpen ? "rotate-180" : ""}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -239,13 +214,12 @@ const TopBar = () => {
               onClose={handleCloseDrawer}
               items={notifications}
             />
-          </div>
+          </>
         ) : (
-          // Logged out state
           <div className="flex items-center gap-3">
             <Link
               to="/login"
-              className="text-sm text-white/70 hover:text-white font-medium transition-colors"
+              className="text-sm text-white/80 hover:text-white font-medium transition-colors"
             >
               Sign In
             </Link>

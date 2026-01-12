@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { apiClient } from "../lib/apiClient";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -30,12 +30,63 @@ interface Props {
     id: string;
     title: string;
     description?: string | null;
+    budget_min?: number;
+    budget_max?: number;
+    currency_code?: string;
   };
   onClose: () => void;
   onSubmitted?: () => void;
 }
 
 const fabricTypes = ["Cotton", "Linen", "Silk", "Wool", "Denim", "Synthetic", "Other"];
+
+type MilestoneRow = {
+  title: string;
+  amount: number;
+  due_date?: string;
+};
+
+const TEMPLATE_OPTIONS = [
+  {
+    id: "default_3",
+    label: "Design → Delivery (3 steps)",
+    steps: [
+      { title: "Concept & Sketch", percent: 30 },
+      { title: "Final Design & Specs", percent: 40 },
+      { title: "Final Delivery & Handover", percent: 30 },
+    ],
+  },
+  {
+    id: "proto_4",
+    label: "Prototype → Production (4 steps)",
+    steps: [
+      { title: "Requirements & BOM", percent: 20 },
+      { title: "Prototype Build", percent: 30 },
+      { title: "Revisions & QA", percent: 25 },
+      { title: "Final Production/Delivery", percent: 25 },
+    ],
+  },
+  {
+    id: "simple_2",
+    label: "Simple Project (2 steps)",
+    steps: [
+      { title: "Kickoff & Plan", percent: 40 },
+      { title: "Final Delivery", percent: 60 },
+    ],
+  },
+];
+
+const TITLE_OPTIONS = [
+  "Concept & Sketch",
+  "Final Design & Specs",
+  "Final Delivery & Handover",
+  "Requirements & BOM",
+  "Prototype Build",
+  "Revisions & QA",
+  "Final Production/Delivery",
+  "Kickoff & Plan",
+  "Final Delivery",
+];
 
 const parseDdMmYyyyToIso = (value: string) => {
   if (!value) return null;
@@ -57,14 +108,19 @@ const parseDdMmYyyyToIso = (value: string) => {
 
 const formatDateIndia = (value: string) => {
   if (!value) return "";
-  const iso = parseDdMmYyyyToIso(value) || value; // fall back to raw value if already ISO
-  const parsed = new Date(iso);
-  return new Intl.DateTimeFormat("en-IN", {
-    timeZone: "Asia/Kolkata",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(parsed);
+  try {
+    const iso = parseDdMmYyyyToIso(value) || value; // fall back to raw value if already ISO
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(parsed);
+  } catch {
+    return value;
+  }
 };
 
 const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
@@ -86,12 +142,15 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
   const [selectedCandidates, setSelectedCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [requestTitle, setRequestTitle] = useState(post.title || "");
   const [garmentType, setGarmentType] = useState("");
   const [fabricType, setFabricType] = useState("");
   const [measurements, setMeasurements] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [desiredRoleFilter, setDesiredRoleFilter] = useState<DesiredRoleFilter>("MAKER");
   const [prefilledFromPost, setPrefilledFromPost] = useState(false);
+  const [milestoneTemplate, setMilestoneTemplate] = useState<string>("default_3");
+  const [milestones, setMilestones] = useState<MilestoneRow[]>([]);
   const isProjectMode = collabMode === "project" || partnerType === "Project";
   const upperRoles = (user?.roles || []).map((r) => String(r).toUpperCase());
   const primaryRole = (user?.active_role || "").toUpperCase();
@@ -146,6 +205,48 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
     };
     checkPending();
   }, [post.id]);
+
+  // Prefill budget from post if available
+  useEffect(() => {
+    if (!prefilledFromPost) {
+      if (post.budget_min) setBudgetMin(String(post.budget_min));
+      setPrefilledFromPost(true);
+    }
+  }, [post, prefilledFromPost]);
+
+  const currencyCode = useMemo(() => post.currency_code || "INR", [post.currency_code]);
+  const totalBudget = useMemo(() => {
+    const val = Number(budgetMin || "0");
+    return Number.isNaN(val) ? 0 : val;
+  }, [budgetMin]);
+
+  // Auto-apply template when budget or template changes
+  useEffect(() => {
+    if (totalBudget > 0 && milestoneTemplate) {
+      const template = TEMPLATE_OPTIONS.find((t) => t.id === milestoneTemplate);
+      if (template) {
+        const rows = template.steps.map((s) => {
+          const amt = s.percent ? Math.round((totalBudget * s.percent) / 100) : 0;
+          return { title: s.title, amount: amt, due_date: "" };
+        });
+        setMilestones(rows);
+      }
+    }
+  }, [totalBudget, milestoneTemplate]);
+
+  const applyTemplate = (templateId: string, total: number) => {
+    const template = TEMPLATE_OPTIONS.find((t) => t.id === templateId);
+    if (!template) return;
+    const rows = template.steps.map((s, idx) => {
+      const amt = total > 0 && s.percent ? Math.round((total * s.percent) / 100) : 0;
+      return {
+        title: s.title,
+        amount: amt || 0,
+        due_date: "",
+      };
+    });
+    setMilestones(rows);
+  };
 
   useEffect(() => {
     const loadCandidates = async () => {
@@ -246,9 +347,12 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
   useEffect(() => {
     if (!prefilledFromPost && !garmentType && post.title) {
       setGarmentType(post.title);
+      if (!requestTitle) {
+        setRequestTitle(post.title);
+      }
       setPrefilledFromPost(true);
     }
-  }, [prefilledFromPost, garmentType, post.title]);
+  }, [prefilledFromPost, garmentType, post.title, requestTitle]);
 
   const formattedDeliveryDate = formatDateIndia(deliveryDate);
   const selectedPrimary = selectedCandidates[0] || null;
@@ -264,6 +368,7 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
         ? `Fulfillment: Bulk, Quantity: ${quantity || "n/a"}${sizeBreakdown ? `, Sizes: ${sizeBreakdown}` : ""}`
         : "Fulfillment: Single item";
     const lines = [
+      `Request: ${requestTitle || post.title || post.id}`,
       `Design: ${post.title || post.id}`,
       `Collaboration type: ${collabMode === "tailor" ? "Ask a Tailor" : "Start a Project"}`,
       rolesLine,
@@ -293,14 +398,44 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
   const submit = async () => {
     setSubmitting(true);
     try {
+      // Ensure we have milestones; if empty and budget set, reapply template
+      let milestoneRows = milestones;
+      if (milestoneRows.length === 0 && totalBudget > 0) {
+        const template = TEMPLATE_OPTIONS.find((t) => t.id === milestoneTemplate);
+        if (template) {
+          milestoneRows = template.steps.map((s) => ({
+            title: s.title,
+            amount: s.percent ? Math.round((totalBudget * s.percent) / 100) : 0,
+            due_date: "",
+          }));
+          setMilestones(milestoneRows);
+        }
+      }
+
+      const milestonePayload = milestoneRows
+        .filter((m) => m.title && m.amount > 0)
+        .map((m) => ({
+          title: m.title,
+          amount: m.amount,
+          due_date: m.due_date || undefined,
+        }));
+
+      const trimmedTitle = (requestTitle || "").trim();
+      if (!trimmedTitle) {
+        alert("Please enter a request name.");
+        return;
+      }
+
       const commonPayload = {
         source_type: "post",
         post_id: post.id,
+        request_title: trimmedTitle,
         requester_role: requesterRole,
         message: buildMessage(),
         budget_min: budgetMin ? Number(budgetMin) : undefined,
         budget_max: undefined,
         delivery_date: deliveryIso,
+        milestones: milestonePayload,
       };
 
       if (isProjectMode) {
@@ -332,7 +467,7 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur">
       <div className="min-h-full flex items-center justify-center p-4">
-        <div className="w-full max-w-4xl rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-fuchsia-500/30 p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="w-full max-w-4xl rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-fuchsia-500/30 p-6 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="flex justify-between items-center mb-4">
           <div>
             <h3 className="text-2xl font-semibold text-white">
@@ -365,6 +500,19 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
             </div>
           ))}
         </div>
+
+        <div className="flex-1 overflow-y-auto pr-1 space-y-6">
+          <div className="space-y-1">
+            <label className="text-xs text-white/60">Request name *</label>
+            <input
+              value={requestTitle}
+              onChange={(e) => setRequestTitle(e.target.value)}
+              className="mt-1 w-full rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+              placeholder="e.g., Wedding gown fitting with Priya"
+              required
+            />
+            <p className="text-[11px] text-white/50">Give this request a short name to spot it quickly in your list.</p>
+          </div>
 
         {step === 1 && (
           <div className="space-y-4">
@@ -653,6 +801,133 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
               </div>
             </div>
 
+            {/* Milestone template + editable rows */}
+            <div className="space-y-2">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                <div>
+                  <label className="text-xs text-white/60 mb-1 block">Milestone template</label>
+                  <select
+                    value={milestoneTemplate}
+                    onChange={(e) => setMilestoneTemplate(e.target.value)}
+                    className="mt-1 mb-2 w-full md:w-72 rounded-lg bg-slate-900 border border-white/10 text-white p-2"
+                  >
+                    {TEMPLATE_OPTIONS.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-white/60">
+                    Pick a template + set budget to auto-create milestones and split amounts.
+                    Use “Add from template…” or “+ Add custom” only if you want extra steps.
+                  </p>
+                </div>
+                <div className="text-xs text-white/50">
+                  Total: {currencyCode} {totalBudget || 0} · Auto-split by template (editable)
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-white/5">
+                <div className="grid grid-cols-12 text-xs text-white/50 px-4 py-2">
+                  <div className="col-span-5">Title</div>
+                  <div className="col-span-3">Amount ({currencyCode})</div>
+                  <div className="col-span-3">Due date (dd/mm/yyyy)</div>
+                  <div className="col-span-1" />
+                </div>
+                {milestones.map((m, idx) => {
+                  return (
+                    <div key={idx} className="grid grid-cols-12 gap-2 px-4 py-2 border-t border-white/5 items-center">
+                      <select
+                        value={m.title}
+                        onChange={(e) => {
+                          const next = [...milestones];
+                          next[idx].title = e.target.value;
+                          setMilestones(next);
+                        }}
+                        className="col-span-5 rounded-lg bg-slate-900 border border-white/10 text-white p-2 text-sm"
+                      >
+                        {TITLE_OPTIONS.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                        {!TITLE_OPTIONS.includes(m.title) && (
+                          <option value={m.title}>{m.title || "Custom title"}</option>
+                        )}
+                      </select>
+                      <input
+                        type="number"
+                        value={m.amount}
+                        onChange={(e) => {
+                          const next = [...milestones];
+                          next[idx].amount = Number(e.target.value || 0);
+                          setMilestones(next);
+                        }}
+                        className="col-span-3 rounded-lg bg-slate-900 border border-white/10 text-white p-2 text-sm"
+                      />
+                      <input
+                        type="text"
+                        value={m.due_date || ""}
+                        placeholder="dd/mm/yyyy"
+                        onChange={(e) => {
+                          const next = [...milestones];
+                          next[idx].due_date = e.target.value;
+                          setMilestones(next);
+                        }}
+                        className="col-span-3 rounded-lg bg-slate-900 border border-white/10 text-white p-2 text-sm"
+                      />
+                      <div className="col-span-1 flex justify-end">
+                        <button
+                          onClick={() => {
+                            const next = milestones.filter((_, i) => i !== idx);
+                            setMilestones(next);
+                          }}
+                          className="text-white/60 hover:text-white"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="px-4 py-2 border-t border-white/10">
+                  <div className="flex items-center gap-3">
+                    <select
+                      className="rounded-lg bg-slate-900 border border-white/10 text-white p-2 text-sm"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (!val) return;
+                        setMilestones((prev) => [
+                          ...prev,
+                          { title: val, amount: 0, due_date: "" },
+                        ]);
+                        e.target.value = "";
+                      }}
+                      defaultValue=""
+                    >
+                      <option value="">Add from template…</option>
+                      {TITLE_OPTIONS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() =>
+                        setMilestones((prev) => [
+                          ...prev,
+                          { title: "New milestone", amount: 0, due_date: "" },
+                        ])
+                      }
+                      className="text-xs text-white/80 hover:text-white px-2 py-1 rounded-lg bg-white/5"
+                    >
+                      + Add custom
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-white/60">Color(s)</label>
@@ -724,6 +999,7 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="text-sm text-white/60 mb-2">Project Summary</div>
               <div className="space-y-1 text-sm">
+                <div><span className="text-white/60">Request:</span> {requestTitle || post.title}</div>
                 <div><span className="text-white/60">Design:</span> {post.title}</div>
                 <div>
                   <span className="text-white/60">Collaborators:</span>{" "}
@@ -733,15 +1009,52 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
                 </div>
                 <div><span className="text-white/60">Garment Type:</span> {garmentType}</div>
                 <div><span className="text-white/60">Fabric Type:</span> {fabricType}</div>
-                <div><span className="text-white/60">Budget:</span> {budgetMin || "—"}</div>
+                <div><span className="text-white/60">Budget:</span> {budgetMin ? `₹${budgetMin}` : "—"}</div>
                 <div><span className="text-white/60">Delivery Date:</span> {formattedDeliveryDate || "—"}</div>
                 <div><span className="text-white/60">Notes:</span> {measurements || message || "—"}</div>
+              </div>
+            </div>
+
+            {/* Order & Escrow Info Banner */}
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">🔒</div>
+                <div>
+                  <div className="font-medium text-emerald-300 mb-1">Secure Payment with Escrow</div>
+                  <div className="text-sm text-emerald-200/80 space-y-1">
+                    <p>Once your collaborator <strong>accepts</strong> this request:</p>
+                    <ul className="list-disc list-inside ml-2 space-y-0.5">
+                      <li>An <strong>Order</strong> will be automatically created</li>
+                      <li>Your payment of <strong>₹{budgetMin || "0"}</strong> will be held in <strong>escrow</strong></li>
+                      <li>Payment is released only after you approve the completed work</li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        <div className="flex justify-between items-center mt-6">
+        {/* Notice about what happens after acceptance */}
+        {step === 3 && (
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
+            <div className="flex items-start gap-3">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 flex-shrink-0 mt-0.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+              </svg>
+              <div>
+                <strong className="text-amber-100">Once accepted, the order starts automatically.</strong>
+                <p className="mt-1 text-amber-200/80">
+                  The collaborator will be able to start work immediately. The budget and deadline you specified will be used to create the order.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        </div>
+
+        <div className="flex justify-between items-center mt-6 pt-4 border-t border-white/10 bg-gradient-to-b from-transparent to-white/5">
           <button
             onClick={() => {
               if (step === 1) onClose();
@@ -771,17 +1084,7 @@ const CollaborationRequestModal = ({ post, onClose, onSubmitted }: Props) => {
                 disabled={submitting || pendingExists}
                 className="px-5 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white disabled:opacity-50"
               >
-                {pendingExists
-                  ? "Pending..."
-                  : submitting
-                    ? "Sending..."
-                    : partnerType === "Fabric Provider"
-                      ? "Send to Fabric Provider"
-                      : partnerType === "Designer"
-                        ? "Send to Designer"
-                        : partnerType === "Project" || collabMode === "project"
-                          ? "Send Project"
-                          : "Send to Tailor"}
+                {pendingExists ? "Pending..." : submitting ? "Sending..." : collabMode === "tailor" ? "Send to Tailor" : "Send Project"}
               </button>
             )}
           </div>
