@@ -38,8 +38,7 @@ const LoginPage = () => {
   };
 
   const handleGoogleLogin = () => {
-    const redirectUrl = `${API_BASE_URL}/auth/login/google`;
-    window.location.href = redirectUrl;
+    window.location.href = "http://localhost:8081/api/creatorshub/auth/login/google";
   };
 
   return (

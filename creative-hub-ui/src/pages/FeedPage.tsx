@@ -16,12 +16,12 @@ type Post = {
   created_as_role?: string | null;
   owner_id?: string | null;
   author_name?: string | null;
-  tags?: string[];
+  // tags from backend; use TagOut[]
+  tags?: TagOut[];
   created_at?: string;
   media_url?: string | null;
   likes_count?: number;
   liked_by_me?: boolean;
-  tags?: TagOut[];
 };
 
 type LikeInfo = {

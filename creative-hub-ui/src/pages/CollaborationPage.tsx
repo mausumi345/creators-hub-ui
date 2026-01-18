@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "../lib/apiClient";
+import CollaborationRequestModal from "../components/CollaborationRequestModal";
 
 type RequestItem = {
   id: string;
   source_type: string;
   post_id?: string | null;
+  request_title?: string | null;
   requester_user_id: string;
   target_user_id: string;
   requester_role: string;
@@ -20,6 +22,7 @@ type RoomItem = {
   request_id: string;
   status: string;
   chat_thread_id?: string | null;
+  request_title?: string | null;
   requester_user_id?: string | null;
   target_user_id?: string | null;
   requester_role?: string | null;
@@ -34,6 +37,7 @@ const CollaborationPage = () => {
   const [rooms, setRooms] = useState<RoomItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [actioning, setActioning] = useState<string | null>(null);
+  const [showRequestModal, setShowRequestModal] = useState(false);
   const navigate = useNavigate();
 
   const load = async () => {
@@ -116,6 +120,12 @@ const CollaborationPage = () => {
             <p className="text-sm text-white/60">Collaborations</p>
             <h1 className="text-2xl font-bold">Requests & Rooms</h1>
           </div>
+          <button
+            onClick={() => setShowRequestModal(true)}
+            className="px-4 py-2 rounded-full text-sm bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-500 hover:to-fuchsia-500"
+          >
+            Start collaboration
+          </button>
         </div>
 
         <div className="flex gap-2">
@@ -134,6 +144,20 @@ const CollaborationPage = () => {
 
         {loading && <div className="text-white/60 text-sm">Loading...</div>}
 
+        {!loading && tab === "inbox" && requests.length > 0 && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200 flex items-center gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 flex-shrink-0">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            <span>
+              <strong>Accepting a request will start the order.</strong> The project details, budget, and deadline from the request will be used to create the order automatically.
+              <span className="block text-emerald-100/80 mt-1">
+                If multiple collaborators are invited, each accepted request becomes its own order and escrow. Split budgets by request.
+              </span>
+            </span>
+          </div>
+        )}
+
         {!loading && tab !== "active" && (
           <div className="space-y-3">
             {requests.length === 0 ? (
@@ -145,8 +169,22 @@ const CollaborationPage = () => {
                     <span>{r.source_type === "post" ? "Post" : "Direct"}</span>
                     <span className="text-white/50">{r.created_at ? new Date(r.created_at).toLocaleString() : ""}</span>
                   </div>
-                  <div className="text-white">
-                    {r.requester_role} → {r.target_role}
+                  <div className="flex items-center gap-2 text-white">
+                    <span className="font-semibold">{r.request_title || "Collaboration request"}</span>
+                    <span className="text-white/60 text-xs">{r.requester_role} → {r.target_role}</span>
+                    <span
+                      className={`text-[11px] px-2 py-0.5 rounded-full ${
+                        r.status === "accepted"
+                          ? "bg-emerald-500/20 text-emerald-200"
+                          : r.status === "declined"
+                          ? "bg-rose-500/20 text-rose-200"
+                          : r.status === "cancelled"
+                          ? "bg-slate-500/20 text-slate-200"
+                          : "bg-amber-500/20 text-amber-100"
+                      }`}
+                    >
+                      {r.status}
+                    </span>
                   </div>
                   {r.message && <div className="text-white/80 text-sm">{r.message}</div>}
                   <div className="flex gap-2">
@@ -154,14 +192,14 @@ const CollaborationPage = () => {
                       <>
                         <button
                           onClick={() => accept(r.id)}
-                          disabled={actioning === r.id}
+                          disabled={actioning === r.id || r.status !== "pending"}
                           className="px-3 py-1.5 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-sm disabled:opacity-50"
                         >
-                          Accept
+                          {r.status === "pending" ? "Accept" : "Accepted"}
                         </button>
                         <button
                           onClick={() => decline(r.id)}
-                          disabled={actioning === r.id}
+                          disabled={actioning === r.id || r.status !== "pending"}
                           className="px-3 py-1.5 rounded-lg bg-slate-800 text-white/80 hover:text-white text-sm disabled:opacity-50"
                         >
                           Decline
@@ -194,9 +232,8 @@ const CollaborationPage = () => {
                     <span>Room</span>
                     <span className="text-white/50">{room.post_id ? `Post ${room.post_id.slice(0, 6)}` : ""}</span>
                   </div>
-                  <div className="text-white text-sm">
-                    {room.requester_role} ↔ {room.target_role}
-                  </div>
+                  <div className="text-white text-sm font-semibold">{room.request_title || "Room"}</div>
+                  <div className="text-white/70 text-xs">{room.requester_role} ↔ {room.target_role}</div>
                   <div className="flex gap-2">
                     <button
                       onClick={() => {
@@ -210,6 +247,12 @@ const CollaborationPage = () => {
                     >
                       Open chat
                     </button>
+                    <button
+                      onClick={() => navigate("/orders")}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm"
+                    >
+                      View Orders
+                    </button>
                   </div>
                 </div>
               ))
@@ -217,6 +260,13 @@ const CollaborationPage = () => {
           </div>
         )}
       </div>
+
+      {showRequestModal && (
+        <CollaborationRequestModal
+          onClose={() => setShowRequestModal(false)}
+          onSubmitted={load}
+        />
+      )}
     </div>
   );
 };

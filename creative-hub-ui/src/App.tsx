@@ -15,6 +15,11 @@ import OnboardingGuard from "./components/OnboardingGuard";
 import FeedPage from "./pages/FeedPage";
 import CollaborationPage from "./pages/CollaborationPage";
 import ChatPage from "./pages/ChatPage";
+import DashboardPage from "./pages/DashboardPage";
+import UserProfilePage from "./pages/UserProfilePage";
+import OrdersPage from "./pages/OrdersPage";
+import OrderDetailPage from "./pages/OrderDetailPage";
+import PayoutSetupPage from "./pages/PayoutSetupPage";
 
 function App() {
   return (
@@ -35,6 +40,11 @@ function App() {
             <Route path="/feed" element={<FeedPage />} />
             <Route path="/collaboration" element={<CollaborationPage />} />
             <Route path="/chat/:threadId" element={<ChatPage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/profile" element={<UserProfilePage />} />
+            <Route path="/orders" element={<OrdersPage />} />
+            <Route path="/orders/:orderId" element={<OrderDetailPage />} />
+            <Route path="/payouts/setup" element={<PayoutSetupPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />

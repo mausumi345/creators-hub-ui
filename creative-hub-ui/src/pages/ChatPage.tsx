@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "../lib/apiClient";
 import { API_BASE_URL } from "../lib/config";
@@ -32,9 +32,15 @@ const ChatPage = () => {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
   const [activeMembers, setActiveMembers] = useState<string[]>([]);
   const [blocking, setBlocking] = useState(false);
+  const [threadTitles, setThreadTitles] = useState<Record<string, string>>({});
+  const [streamStatus, setStreamStatus] = useState<"connected" | "reconnecting" | "disconnected">("disconnected");
+  const streamRef = useRef<EventSource | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
 
   const activeThreadId = threadId || (threads.length > 0 ? threads[0].id : null);
 
@@ -47,8 +53,39 @@ const ChatPage = () => {
     }
   };
 
+  useEffect(() => {
+    const hydrateTitles = async () => {
+      const targets = threads
+        .map((t) => ({ id: t.id, roomId: t.metadata?.room_id as string | undefined }))
+        .filter((t) => t.roomId && !threadTitles[t.id])
+        .slice(0, 20);
+      if (targets.length === 0) return;
+      try {
+        const results = await Promise.all(
+          targets.map((t) =>
+            apiClient
+              .get(`/collaboration/rooms/${t.roomId}`)
+              .then((res) => ({ id: t.id, title: res.data?.request_title }))
+              .catch(() => ({ id: t.id, title: undefined }))
+          )
+        );
+        setThreadTitles((prev) => {
+          const next = { ...prev };
+          results.forEach((r) => {
+            if (r.title) next[r.id] = r.title;
+          });
+          return next;
+        });
+      } catch (e) {
+        console.error("Failed to load thread titles", e);
+      }
+    };
+    hydrateTitles();
+  }, [threads, threadTitles]);
+
   const loadMessages = async (id: string) => {
     setLoadingMsgs(true);
+    setLoadError(null);
     try {
       const res = await apiClient.get(`/chat/threads/${id}/messages`, { params: { limit: 50 } });
       const items: Message[] = res.data || [];
@@ -56,6 +93,7 @@ const ChatPage = () => {
       setMessages(items.slice().reverse());
     } catch (err) {
       console.error("Failed to load messages", err);
+      setLoadError("Unable to load messages. Please retry.");
     } finally {
       setLoadingMsgs(false);
     }
@@ -76,21 +114,76 @@ const ChatPage = () => {
         })
         .catch(() => {});
 
-      loadMessages(activeThreadId);
-      const src = new EventSource(`${API_BASE_URL}/chat/threads/${activeThreadId}/stream`, { withCredentials: true });
-      src.addEventListener("message.created", (evt) => {
-        try {
-          const data = JSON.parse((evt as MessageEvent).data);
-          setMessages((prev) => {
-            if (prev.find((m) => m.id === data.id)) return prev;
-            return [...prev, data];
-          });
-        } catch (e) {
-          console.error(e);
+      const timeoutId = window.setTimeout(() => {
+        setLoadingMsgs(false);
+        if (!messages.length) {
+          setLoadError("Messages are taking too long to load. Please retry.");
         }
-      });
+      }, 8000);
+      loadMessages(activeThreadId);
+      loadThreads();
+
+      const connectStream = () => {
+        if (!activeThreadId) return;
+        if (streamRef.current) {
+          streamRef.current.close();
+        }
+        const src = new EventSource(`${API_BASE_URL}/chat/threads/${activeThreadId}/stream`, { withCredentials: true });
+        streamRef.current = src;
+
+        src.onopen = () => {
+          setStreamStatus("connected");
+          reconnectAttemptsRef.current = 0;
+        };
+
+        src.addEventListener("message.created", (evt) => {
+          try {
+            const data = JSON.parse((evt as MessageEvent).data);
+            setMessages((prev) => {
+              if (prev.find((m) => m.id === data.id)) return prev;
+              return [...prev, data];
+            });
+            loadThreads();
+          } catch (e) {
+            console.error(e);
+          }
+        });
+
+        src.onerror = () => {
+          setStreamStatus("reconnecting");
+          src.close();
+          const attempt = Math.min(reconnectAttemptsRef.current + 1, 5);
+          reconnectAttemptsRef.current = attempt;
+          const delay = Math.min(1000 * 2 ** attempt, 15000);
+          if (reconnectTimerRef.current) {
+            window.clearTimeout(reconnectTimerRef.current);
+          }
+          reconnectTimerRef.current = window.setTimeout(() => {
+            connectStream();
+          }, delay);
+        };
+      };
+
+      connectStream();
+
+      const pollId = window.setInterval(() => {
+        if (!activeThreadId) return;
+        loadMessages(activeThreadId);
+        loadThreads();
+      }, 20000);
+
       return () => {
-        src.close();
+        window.clearTimeout(timeoutId);
+        if (streamRef.current) {
+          streamRef.current.close();
+          streamRef.current = null;
+        }
+        if (reconnectTimerRef.current) {
+          window.clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+        window.clearInterval(pollId);
+        setStreamStatus("disconnected");
       };
     }
   }, [activeThreadId]);
@@ -149,7 +242,9 @@ const ChatPage = () => {
                   t.id === activeThreadId ? "bg-white/10 border border-fuchsia-500/40" : "border border-transparent"
                 }`}
               >
-                <div className="text-sm font-semibold text-white line-clamp-1">Thread {t.id.slice(0, 8)}</div>
+                <div className="text-sm font-semibold text-white line-clamp-1">
+                  {threadTitles[t.id] || (t.metadata?.room_id ? `Collab ${String(t.metadata.room_id).slice(0, 6)}` : `Thread ${t.id.slice(0, 8)}`)}
+                </div>
                 {t.last_message && (
                   <div className="text-xs text-white/60 line-clamp-1">{t.last_message.body || t.last_message.message_type}</div>
                 )}
@@ -164,8 +259,25 @@ const ChatPage = () => {
           <div className="p-4 border-b border-white/10 flex items-center justify-between">
             <div>
               <p className="text-sm text-white/60">Chat</p>
-              <h1 className="text-xl font-semibold">{activeThreadId ? `Thread ${activeThreadId.slice(0, 8)}` : "Select a thread"}</h1>
+              <h1 className="text-xl font-semibold">
+                {activeThreadId
+                  ? threadTitles[activeThreadId] ||
+                    (threads.find((t) => t.id === activeThreadId)?.metadata?.room_id
+                      ? `Collab ${String(threads.find((t) => t.id === activeThreadId)?.metadata?.room_id).slice(0, 6)}`
+                      : `Thread ${activeThreadId.slice(0, 8)}`)
+                  : "Select a thread"}
+              </h1>
             </div>
+            <div className="flex items-center gap-3">
+              <span className={`text-xs ${
+                streamStatus === "connected"
+                  ? "text-emerald-300"
+                  : streamStatus === "reconnecting"
+                  ? "text-amber-300"
+                  : "text-white/50"
+              }`}>
+                {streamStatus === "connected" ? "Live" : streamStatus === "reconnecting" ? "Reconnecting…" : "Offline"}
+              </span>
             {otherUserId && (
               <button
                 onClick={blockUser}
@@ -175,10 +287,16 @@ const ChatPage = () => {
                 {blocking ? "Blocking..." : "Block user"}
               </button>
             )}
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {loadingMsgs && <div className="text-sm text-white/60">Loading messages...</div>}
+            {loadingMsgs && <div className="text-sm text-white/60">Loading messages…</div>}
+            {loadError && (
+              <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                {loadError}
+              </div>
+            )}
             {!loadingMsgs &&
               messages.map((m) => (
                 <div key={m.id} className="flex flex-col gap-1">
